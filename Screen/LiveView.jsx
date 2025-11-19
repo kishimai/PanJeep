@@ -17,7 +17,7 @@ export function LiveView({ navigation }) {
 
             const current = await Location.getCurrentPositionAsync({});
             if (!isMounted) return;
-            setLocation(current.coords);
+            setLocation(current.coords);w
 
             const watcher = await Location.watchPositionAsync(
                 {
