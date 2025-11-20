@@ -26,7 +26,6 @@ export default function App() {
             <Stack.Navigator screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="Login" component={Login} />
                 <Stack.Screen name="RouteView" component={RouteView} />
-                <Stack.Screen name="LiveView" component={LiveView} />
             </Stack.Navigator>
             <StatusBar style="auto" />
         </NavigationContainer>
