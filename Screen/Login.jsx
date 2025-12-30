@@ -2,13 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
-import { saveDeviceId } from '../utils/firebase';
 
 export function Login({ navigation }) {
     const [text, setText] = useState('');
 
     useEffect(() => {
-        saveDeviceId({ navigation }); // run once when Login screen mounts
+        // ToDo: log user in the firebase database.
     }, []);
 
     return (
@@ -23,7 +22,7 @@ export function Login({ navigation }) {
 
                 <TextInput style={styles.input} placeholder='Enter Preferred Name' value={text} onChangeText={setText}/>
 
-                <TouchableOpacity style={styles.ContinueButton} onPress={() => navigation.replace('RouteView')}>
+                <TouchableOpacity style={styles.ContinueButton} onPress={() => navigation.replace('LiveView')}>
                     <Text style={{ color: 'white', fontSize: 16, textAlign: 'center', fontFamily: 'MartianMono_400Regular' }}>Register</Text>
                 </TouchableOpacity>
 
