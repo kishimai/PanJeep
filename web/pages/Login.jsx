@@ -22,13 +22,11 @@ export default function Login() {
         e.preventDefault();
         setLoading(true);
 
-
-        // Supabase auth login
+        // 1. Login
         const { data, error } = await supabase.auth.signInWithPassword({
             email,
             password,
         });
-
 
         if (error) {
             setLoading(false);
@@ -36,10 +34,27 @@ export default function Login() {
             return;
         }
 
+        // 2. Fetch profile
+        // After successful login
+        const { data: profile, error: profileError } = await supabase
+            .from("admin_profiles")
+            .select("*")
+            .eq("id::text", data.user.id)
+            .single();
 
+        if (profileError) {
+            alert(profileError.message);
+            setLoading(false);
+            return;
+        }
+
+        console.log("Profile:", profile);
+
+        // 3. Done
         setLoading(false);
         alert("Logged in successfully");
     };
+
 
     return (
         <Container
