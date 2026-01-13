@@ -3,6 +3,7 @@ import Login from '../pages/Login.jsx';
 import Map from './Map.jsx';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import {createTheme, ThemeProvider} from "@mui/material";
+import {Dashboard} from "../pages/Dashboard.jsx";
 
 const theme = createTheme({
     palette: {
@@ -19,6 +20,7 @@ function App() {
                 <Routes>
                     <Route path="/" element={<Login />} />
                     <Route path="/map" element={<Map />} />
+                    <Route path="/dashboard" element={<Dashboard />} />
                 </Routes>
             </BrowserRouter>
         </ThemeProvider>

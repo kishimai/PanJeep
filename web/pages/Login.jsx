@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import {
     Container,
     Paper,
@@ -12,11 +12,15 @@ import {
 import EmailIcon from "@mui/icons-material/Email";
 import LockIcon from "@mui/icons-material/Lock";
 import {supabase} from "../src/supabase.jsx";
+import {useNavigate} from "react-router-dom";
 
 export default function Login() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
+    const [profile, setProfile] = useState(null);
+
+    const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -34,12 +38,18 @@ export default function Login() {
             return;
         }
 
-        // 2. Fetch profile
+        // 2. Fetch ProfileContext.jsx
         // After successful login
+        const { data: sessionData } = await supabase.auth.getSession();
+
+        const { data: profilesData, error: profilesError } = await supabase
+            .from("admin_profiles")
+            .select("*");
+
         const { data: profile, error: profileError } = await supabase
             .from("admin_profiles")
             .select("*")
-            .eq("id::text", data.user.id)
+            .eq("id", data.user.id)
             .single();
 
         if (profileError) {
@@ -48,11 +58,13 @@ export default function Login() {
             return;
         }
 
-        console.log("Profile:", profile);
-
         // 3. Done
         setLoading(false);
         alert("Logged in successfully");
+        if (!profileError) {
+            setProfile(profile);
+            navigate("/dashboard"); // redirect
+        }
     };
 
 
