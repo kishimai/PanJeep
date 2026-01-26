@@ -31,6 +31,7 @@ export function Dashboard() {
 
     return profile.role === "admin" ? (
         <AdminDashboard profile={profile} />
+
     ) : (
         <OperatorDashboard profile={profile} />
     );

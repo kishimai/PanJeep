@@ -1,14 +1,18 @@
 import { useState, useEffect } from "react";
 import { RouteCreator } from "../src/RouteCreator.jsx";
 import { supabase } from "../src/supabase.jsx";
+import {WidthFull} from "@mui/icons-material";
 
 export function OperatorDashboard({ profile }) {
-    const operatorTabs = ["Home", "Routes", "Onboarding", "Support", "Data Quality"];
+    const operatorTabs = ["Summary", "Route Overview", "Driver Onboarding", "Support Tickets", "Data Quality", "Account Management", "Client Management"];
     const [activeTab, setActiveTab] = useState("Home");
 
-    // NEW STATES
     const [regions, setRegions] = useState([]);
     const [selectedRegionId, setSelectedRegionId] = useState("");
+
+    const [isCreatingRegion, setIsCreatingRegion] = useState(false);
+    const [clientStep, setClientStep] = useState(1);
+
 
     useEffect(() => {
         const fetchRegions = async () => {
@@ -53,26 +57,7 @@ export function OperatorDashboard({ profile }) {
     function renderRoutes() {
         return (
             <div>
-                <h3>Routes Management</h3>
-
-                <select
-                    value={selectedRegionId}
-                    onChange={(e) => setSelectedRegionId(e.target.value)}
-                >
-                    <option value="">Select Region</option>
-                    {regions.map((r) => (
-                        <option key={r.id} value={r.id}>
-                            {r.name}
-                        </option>
-                    ))}
-                </select>
-
-                {selectedRegionId && (
-                    <RouteCreator
-                        regionId={selectedRegionId}
-                        operatorId={profile.id}
-                    />
-                )}
+                <h3>Put Active Routes Here</h3>
             </div>
         );
     }
@@ -98,18 +83,149 @@ export function OperatorDashboard({ profile }) {
         </div>
     );
 
+    const renderAccountManagement = () => (
+       <div>
+           <h3>Account Management</h3>
+       </div>
+    );
+
+    const renderClientManagement = () => {
+        if (isCreatingRegion) {
+            return renderRegionCreationFlow();
+        }
+
+        return (
+            <div>
+                {/* Header Action */}
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem", width: "20%" }}>
+                    <button
+                        style={primaryButtonStyle}
+                        onClick={() => {
+                            setClientStep(1);
+                            setIsCreatingRegion(true);
+                        }}
+                    >
+                        Create Transportation Region
+                    </button>
+                </div>
+
+                {/* Client List */}
+                <div style={{ display: "grid", gap: "1rem" }}>
+                    {regions.length === 0 && (
+                        <div style={cardStyle}>
+                            <p>No LGU regions onboarded yet.</p>
+                        </div>
+                    )}
+
+                    {regions.map(region => (
+                        <div key={region.id} style={cardStyle}>
+                            <h3>{region.name}</h3>
+
+                            <p style={{ opacity: 0.7 }}>
+                                Status: Digitization in progress
+                            </p>
+
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                <button style={secondaryButtonStyle}>
+                                    View
+                                </button>
+                                <button style={secondaryButtonStyle}>
+                                    Continue Digitization
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    const renderRegionCreationFlow = () => (
+        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+
+            {/* Wizard Header */}
+            <div style={{ marginBottom: "1rem" }}>
+                <button
+                    style={{ ...secondaryButtonStyle, width: "auto" }}
+                    onClick={() => setIsCreatingRegion(false)}
+                >
+                    ← Back to Clients
+                </button>
+            </div>
+
+            <div style={{ marginBottom: "1rem", opacity: 0.7 }}>
+                Step {clientStep} of 4
+            </div>
+
+            {clientStep === 1 && (
+                <div style={cardStyle}>
+                    <h2>LGU Region Setup</h2>
+                    <input placeholder="Region name" style={inputStyle} />
+                </div>
+            )}
+
+            {clientStep === 2 && (
+                <div style={cardStyle}>
+                    <h2>Assign eTranspo Operator</h2>
+                    <select style={inputStyle}>
+                        <option>Select Staff</option>
+                    </select>
+                </div>
+            )}
+
+            {clientStep === 3 && (
+                <div style={cardStyle}>
+                    <h2>LGU Admin Accounts</h2>
+                    <input placeholder="Admin email" style={inputStyle} />
+                    <button style={secondaryButtonStyle}>Add Admin</button>
+                </div>
+            )}
+
+            {clientStep === 4 && (
+                <div style={cardStyle}>
+                    <h2>Route Digitization</h2>
+                    <RouteCreator />
+                </div>
+            )}
+
+            {/* Wizard Controls */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1rem" }}>
+                <button
+                    disabled={clientStep === 1}
+                    style={secondaryButtonStyle}
+                    onClick={() => setClientStep(s => s - 1)}
+                >
+                    Back
+                </button>
+
+                <button
+                    disabled={clientStep === 4}
+                    style={primaryButtonStyle}
+                    onClick={() => setClientStep(s => s + 1)}
+                >
+                    Continue
+                </button>
+            </div>
+        </div>
+    );
+
+
     const renderContent = () => {
         switch (activeTab) {
-            case "Home":
+            case "Summary":
                 return renderHome();
-            case "Routes":
+            case "Route Overview":
                 return renderRoutes();
-            case "Onboarding":
+            case "Driver Onboarding":
                 return renderOnboarding();
             case "Support":
                 return renderSupport();
             case "Data Quality":
                 return renderDataQuality();
+            case "Account Management":
+                return renderAccountManagement();
+            case "Client Management":
+                return renderClientManagement();
             default:
                 return null;
         }
@@ -146,12 +262,6 @@ export function OperatorDashboard({ profile }) {
             {/* Main Content */}
             <main style={mainStyle}>
                 <header style={headerStyle}>
-                    <div>
-                        <h2 style={{ margin: 0, fontWeight: 700, fontSize: "1.5rem" }}>{activeTab}</h2>
-                        <p style={{ margin: 0, fontSize: "0.9rem", color: "#6b7280" }}>
-                            Welcome, {profile.full_name}
-                        </p>
-                    </div>
                 </header>
 
                 <section style={{ marginTop: "1rem" }}>{renderContent()}</section>
@@ -188,3 +298,31 @@ const cardStyle = {
     padding: "1rem",
     boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
 };
+
+const inputStyle = {
+    width: "100%",
+    padding: "0.5rem",
+    marginBottom: "0.5rem",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+};
+
+const primaryButtonStyle = {
+    width: "100%",
+    padding: "0.5rem",
+    backgroundColor: "#2563eb",
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+};
+
+const secondaryButtonStyle = {
+    width: "100%",
+    padding: "0.5rem",
+    backgroundColor: "#e5e7eb",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+};
+
