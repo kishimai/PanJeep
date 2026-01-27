@@ -13,6 +13,26 @@ export function OperatorDashboard({ profile }) {
     const [isCreatingRegion, setIsCreatingRegion] = useState(false);
     const [clientStep, setClientStep] = useState(1);
 
+    const [lguForm, setLguForm] = useState({
+        lguType: "",
+        officialName: "",
+        psgcCode: "",
+        region: "",
+        barangays: "",
+        authorizingOffice: "",
+        legalBasis: "",
+        referenceNumber: "",
+        effectiveDate: "",
+        primaryAdminName: "",
+        primaryAdminPosition: "",
+        primaryAdminEmail: "",
+        secondaryAdminEmail: "",
+    });
+
+    const updateLguForm = (field, value) => {
+        setLguForm(prev => ({ ...prev, [field]: value }));
+    };
+
 
     useEffect(() => {
         const fetchRegions = async () => {
@@ -157,33 +177,121 @@ export function OperatorDashboard({ profile }) {
                 Step {clientStep} of 4
             </div>
 
+            {/* IDENTITY */}
             {clientStep === 1 && (
                 <div style={cardStyle}>
-                    <h2>LGU Region Setup</h2>
-                    <input placeholder="Region name" style={inputStyle} />
+                    <h2>LGU Legal Identity & Jurisdiction</h2>
+
+                    <select
+                        style={inputStyle}
+                        onChange={e => updateLguForm("lguType", e.target.value)}
+                    >
+                        <option value="">Select LGU Type</option>
+                        <option>Province</option>
+                        <option>City</option>
+                        <option>Municipality</option>
+                    </select>
+
+                    <input
+                        placeholder="Official LGU Name (e.g. City Government of Angeles)"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("officialName", e.target.value)}
+                    />
+
+                    <input
+                        placeholder="PSGC Code"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("psgcCode", e.target.value)}
+                    />
+
+                    <input
+                        placeholder="Administrative Region (e.g. Region III)"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("region", e.target.value)}
+                    />
+
+                    <input
+                        placeholder="Barangays Covered (comma-separated)"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("barangays", e.target.value)}
+                    />
                 </div>
             )}
 
+            {/* AUTHORITY */}
             {clientStep === 2 && (
                 <div style={cardStyle}>
-                    <h2>Assign eTranspo Operator</h2>
-                    <select style={inputStyle}>
-                        <option>Select Staff</option>
+                    <h2>Legal Authority & Authorization</h2>
+
+                    <input
+                        placeholder="Authorizing Office (e.g. Mayor’s Office)"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("authorizingOffice", e.target.value)}
+                    />
+
+                    <select
+                        style={inputStyle}
+                        onChange={e => updateLguForm("legalBasis", e.target.value)}
+                    >
+                        <option value="">Select Legal Basis</option>
+                        <option>Executive Order</option>
+                        <option>City Ordinance</option>
+                        <option>Memorandum of Agreement</option>
+                        <option>Pilot Authorization</option>
                     </select>
+
+                    <input
+                        placeholder="Reference Number (e.g. EO No. 12 s. 2024)"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("referenceNumber", e.target.value)}
+                    />
+
+                    <input
+                        type="date"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("effectiveDate", e.target.value)}
+                    />
                 </div>
             )}
 
+            {/* OFFICIALS */}
             {clientStep === 3 && (
                 <div style={cardStyle}>
-                    <h2>LGU Admin Accounts</h2>
-                    <input placeholder="Admin email" style={inputStyle} />
-                    <button style={secondaryButtonStyle}>Add Admin</button>
+                    <h2>LGU Officials & Administrator Accounts</h2>
+
+                    <input
+                        placeholder="Primary Official Name"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("primaryAdminName", e.target.value)}
+                    />
+
+                    <input
+                        placeholder="Position Title (e.g. City Transport Officer)"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("primaryAdminPosition", e.target.value)}
+                    />
+
+                    <input
+                        placeholder="Official Email"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("primaryAdminEmail", e.target.value)}
+                    />
+
+                    <input
+                        placeholder="Secondary / Backup Email"
+                        style={inputStyle}
+                        onChange={e => updateLguForm("secondaryAdminEmail", e.target.value)}
+                    />
                 </div>
             )}
 
+            {/* ROUTE DIGITIZATION */}
             {clientStep === 4 && (
                 <div style={cardStyle}>
-                    <h2>Route Digitization</h2>
+                    <h2>Official Route Digitization</h2>
+                    <p style={{ opacity: 0.7 }}>
+                        Routes created here will be officially associated with this LGU.
+                    </p>
                     <RouteCreator />
                 </div>
             )}
@@ -208,6 +316,7 @@ export function OperatorDashboard({ profile }) {
             </div>
         </div>
     );
+
 
 
     const renderContent = () => {
@@ -300,7 +409,7 @@ const cardStyle = {
 };
 
 const inputStyle = {
-    width: "100%",
+    width: "80vh",
     padding: "0.5rem",
     marginBottom: "0.5rem",
     borderRadius: "8px",
