@@ -174,7 +174,7 @@ export function OperatorDashboard({ profile }) {
             </div>
 
             <div style={{ marginBottom: "1rem", opacity: 0.7 }}>
-                Step {clientStep} of 4
+                Step {clientStep} of 3
             </div>
 
             {/* IDENTITY */}
@@ -285,17 +285,6 @@ export function OperatorDashboard({ profile }) {
                 </div>
             )}
 
-            {/* ROUTE DIGITIZATION */}
-            {clientStep === 4 && (
-                <div style={cardStyle}>
-                    <h2>Official Route Digitization</h2>
-                    <p style={{ opacity: 0.7 }}>
-                        Routes created here will be officially associated with this LGU.
-                    </p>
-                    <RouteCreator />
-                </div>
-            )}
-
             {/* Wizard Controls */}
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1rem" }}>
                 <button
@@ -307,7 +296,7 @@ export function OperatorDashboard({ profile }) {
                 </button>
 
                 <button
-                    disabled={clientStep === 4}
+                    disabled={clientStep === 3}
                     style={primaryButtonStyle}
                     onClick={() => setClientStep(s => s + 1)}
                 >
