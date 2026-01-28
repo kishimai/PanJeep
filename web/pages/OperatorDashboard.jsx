@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { RouteCreator } from "../src/RouteCreator.jsx";
+import { RouteManager } from "../src/RouteCreator.jsx";
 import { supabase } from "../src/supabase.jsx";
 import {WidthFull} from "@mui/icons-material";
 
@@ -33,6 +33,10 @@ export function OperatorDashboard({ profile }) {
         setLguForm(prev => ({ ...prev, [field]: value }));
     };
 
+    const [accounts, setAccounts] = useState([]);
+    const [accountsLoading, setAccountsLoading] = useState(true);
+    const [accountsError, setAccountsError] = useState(null);
+
 
     useEffect(() => {
         const fetchRegions = async () => {
@@ -51,6 +55,58 @@ export function OperatorDashboard({ profile }) {
 
         fetchRegions();
     }, []);
+
+    useEffect(() => {
+        fetchAccounts();
+    }, []);
+
+    const fetchAccounts = async () => {
+        setAccountsLoading(true);
+        setAccountsError(null);
+
+        try {
+            const { data: users, error: userError } = await supabase
+                .from("users")
+                .select("id, email, role");
+
+            if (userError) throw userError;
+
+            const { data: operators } = await supabase
+                .from("operators")
+                .select("id");
+
+            const { data: admins } = await supabase
+                .from("administration")
+                .select("id");
+
+            const operatorSet = new Set(operators?.map(o => o.id));
+            const adminSet = new Set(admins?.map(a => a.id));
+
+            const merged = users.map(u => {
+                let misaligned = false;
+
+                if (u.role === "operator" && !operatorSet.has(u.id)) {
+                    misaligned = true;
+                }
+
+                if (u.role === "administration" && !adminSet.has(u.id)) {
+                    misaligned = true;
+                }
+
+                return {
+                    ...u,
+                    misaligned,
+                };
+            });
+
+            setAccounts(merged);
+        } catch (err) {
+            console.error(err);
+            setAccountsError("Failed to load accounts");
+        } finally {
+            setAccountsLoading(false);
+        }
+    };
 
     const renderHome = () => (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
@@ -77,7 +133,7 @@ export function OperatorDashboard({ profile }) {
     function renderRoutes() {
         return (
             <div>
-                <h3>Put Active Routes Here</h3>
+                <RouteManager />
             </div>
         );
     }
@@ -104,10 +160,85 @@ export function OperatorDashboard({ profile }) {
     );
 
     const renderAccountManagement = () => (
-       <div>
-           <h3>Account Management</h3>
-       </div>
+        <div>
+            <h3>Account Management</h3>
+
+            <div style={{ marginBottom: "1rem", width: "300px" }}>
+                <button
+                    style={primaryButtonStyle}
+                    onClick={() => alert("Create account → Edge Function")}
+                >
+                    + Create Account
+                </button>
+            </div>
+
+            {accountsLoading && <p>Loading accounts…</p>}
+
+            {accountsError && (
+                <p style={{ color: "red" }}>{accountsError}</p>
+            )}
+
+            {!accountsLoading && accounts.length === 0 && (
+                <p>No accounts found.</p>
+            )}
+
+            <div style={{ display: "grid", gap: "0.75rem" }}>
+                {accounts.map(acc => (
+                    <div
+                        key={acc.id}
+                        style={{
+                            ...cardStyle,
+                            borderLeft: acc.misaligned
+                                ? "6px solid #dc2626"
+                                : "6px solid #16a34a",
+                        }}
+                    >
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <div>
+                                <h4 style={{ margin: 0 }}>
+                                    {acc.email}
+                                </h4>
+                                <p style={{ margin: "0.25rem 0", opacity: 0.7 }}>
+                                    Role: {acc.role}
+                                </p>
+                            </div>
+
+                            <div style={{ fontWeight: 700 }}>
+                                {acc.misaligned ? "⚠ MISALIGNED" : "✓ OK"}
+                            </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                            <button
+                                style={secondaryButtonStyle}
+                                onClick={() => alert("Edit details (safe fields only)")}
+                            >
+                                Edit
+                            </button>
+
+                            <button
+                                style={secondaryButtonStyle}
+                                onClick={() => alert("Reset password → Admin API")}
+                            >
+                                Reset Password
+                            </button>
+
+                            <button
+                                style={{
+                                    ...secondaryButtonStyle,
+                                    backgroundColor: "#fee2e2",
+                                }}
+                                onClick={() => alert("Delete account → Edge Function")}
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
     );
+
 
     const renderClientManagement = () => {
         if (isCreatingRegion) {

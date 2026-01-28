@@ -9,12 +9,50 @@ export function Dashboard() {
 
     useEffect(() => {
         const fetchProfile = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            const { data: profileData } = await supabase
-                .from("admin_profiles")
-                .select("*")
+            // Get logged-in user
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) {
+                setLoading(false);
+                return;
+            }
+
+            // Fetch user's core info from "users" table
+            const { data: userData, error: userDataError } = await supabase
+                .from("users")
+                .select("id, role, email")
                 .eq("id", user.id)
                 .single();
+
+            if (userDataError || !userData) {
+                setLoading(false);
+                return;
+            }
+
+            let profileData = null;
+
+            // Fetch role-specific profile
+            if (userData.role === "operator") {
+                const { data, error } = await supabase
+                    .from("operators")
+                    .select("*")
+                    .eq("id", userData.id)
+                    .single();
+                profileData = data;
+
+            } else if (userData.role === "administration") {
+                const { data, error } = await supabase
+                    .from("administration")
+                    .select("*")
+                    .eq("id", userData.id)
+                    .single();
+                profileData = data;
+            }
+
+            // Merge with core user info
+            if (profileData) {
+                profileData.role = userData.role;
+                profileData.email = userData.email;
+            }
 
             setProfile(profileData);
             setLoading(false);
@@ -25,13 +63,12 @@ export function Dashboard() {
 
     if (loading) return <p>Loading dashboard...</p>;
 
-    if (!profile || !["admin", "operator"].includes(profile.role)) {
+    if (!profile || !["operator", "administration"].includes(profile.role)) {
         return <p>Access denied.</p>;
     }
 
-    return profile.role === "admin" ? (
+    return profile.role === "administration" ? (
         <AdminDashboard profile={profile} />
-
     ) : (
         <OperatorDashboard profile={profile} />
     );
