@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { RouteManager } from "../src/RouteCreator.jsx";
+import { RouteEditor } from "../src/RouteEditor.jsx";
 import { supabase } from "../src/supabase.jsx";
 import {WidthFull} from "@mui/icons-material";
+import {RouteManager} from "../src/RouteManager.jsx";
+import {Routes} from "react-router-dom";
 
 export function OperatorDashboard({ profile }) {
     const operatorTabs = ["Summary", "Route Overview", "Driver Onboarding", "Support Tickets", "Data Quality", "Account Management", "Client Management"];
@@ -131,11 +133,7 @@ export function OperatorDashboard({ profile }) {
     );
 
     function renderRoutes() {
-        return (
-            <div>
-                <RouteManager />
-            </div>
-        );
+        return <RouteManager />
     }
 
     const renderOnboarding = () => (
@@ -161,8 +159,6 @@ export function OperatorDashboard({ profile }) {
 
     const renderAccountManagement = () => (
         <div>
-            <h3>Account Management</h3>
-
             <div style={{ marginBottom: "1rem", width: "300px" }}>
                 <button
                     style={primaryButtonStyle}
