@@ -4,6 +4,7 @@ import { supabase } from "../src/supabase.jsx";
 import {WidthFull} from "@mui/icons-material";
 import {RouteManager} from "../src/RouteManager.jsx";
 import {Routes} from "react-router-dom";
+import { createAccount }  from "../src/createAccount.jsx";
 
 export function OperatorDashboard({ profile }) {
     const operatorTabs = ["Summary", "Route Overview", "Driver Onboarding", "Support Tickets", "Data Quality", "Account Management", "Client Management"];
@@ -30,6 +31,17 @@ export function OperatorDashboard({ profile }) {
         primaryAdminEmail: "",
         secondaryAdminEmail: "",
     });
+
+    // Account Management UI state (MOVED OUT OF renderAccountManagement)
+    const [searchId, setSearchId] = useState("");
+    const [modalOpen, setModalOpen] = useState(false);
+    const [newAccountData, setNewAccountData] = useState({
+        email: "",
+        full_name: "",
+        role: "operator",
+        role_variant: "",
+    });
+    const [creationResult, setCreationResult] = useState(null);
 
     const updateLguForm = (field, value) => {
         setLguForm(prev => ({ ...prev, [field]: value }));
@@ -157,83 +169,163 @@ export function OperatorDashboard({ profile }) {
         </div>
     );
 
-    const renderAccountManagement = () => (
-        <div>
-            <div style={{ marginBottom: "1rem", width: "300px" }}>
-                <button
-                    style={primaryButtonStyle}
-                    onClick={() => alert("Create account → Edge Function")}
-                >
-                    + Create Account
-                </button>
-            </div>
+    const filteredAccounts = accounts.filter(acc =>
+        (acc.staff_id ?? "").toLowerCase().includes((searchId ?? "").toLowerCase())
+    );
 
-            {accountsLoading && <p>Loading accounts…</p>}
+    const renderAccountManagement = () => {
 
-            {accountsError && (
-                <p style={{ color: "red" }}>{accountsError}</p>
-            )}
+        const filteredAccounts = accounts.filter(acc =>
+            (acc.staff_id ?? "").toLowerCase().includes((searchId ?? "").toLowerCase())
+        );
 
-            {!accountsLoading && accounts.length === 0 && (
-                <p>No accounts found.</p>
-            )}
+        const handleCreateAccount = async (e) => {
+            e.preventDefault();
+            setCreationResult(null);
 
-            <div style={{ display: "grid", gap: "0.75rem" }}>
-                {accounts.map(acc => (
-                    <div
-                        key={acc.id}
+            try {
+                const data = await createAccount(newAccountData);
+                setCreationResult(data);
+
+                // Refresh accounts list automatically
+                setAccounts(prev => [...prev, { ...newAccountData, ...data, id: data.staff_id }]);
+                setModalOpen(false);
+                // Reset form
+                setNewAccountData({ email: "", full_name: "", role: "operator", role_variant: "" });
+            } catch (err) {
+                setAccountsError(err.message);
+            }
+        };
+
+        return (
+            <div>
+                {/* Top actions */}
+                <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
+                    <button style={primaryButtonStyle} onClick={() => setModalOpen(true)}>
+                        + Create Account
+                    </button>
+
+                    <input
+                        type="text"
+                        placeholder="Search by Staff ID"
+                        value={searchId}
+                        onChange={e => setSearchId(e.target.value)}
                         style={{
-                            ...cardStyle,
-                            borderLeft: acc.misaligned
-                                ? "6px solid #dc2626"
-                                : "6px solid #16a34a",
+                            padding: "0.5rem",
+                            border: "1px solid #ccc",
+                            borderRadius: 4,
+                            width: 220,
+                        }}
+                    />
+                </div>
+
+                {accountsLoading && <p>Loading accounts…</p>}
+                {accountsError && <p style={{ color: "red" }}>{accountsError}</p>}
+                {!accountsLoading && filteredAccounts.length === 0 && (
+                    <p>No accounts found.</p>
+                )}
+
+                {/* List */}
+                <div style={{ border: "1px solid #e5e7eb" }}>
+                    {filteredAccounts.map(acc => (
+                        <div
+                            key={acc.id}
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "140px 1fr 160px 120px",
+                                alignItems: "center",
+                                padding: "0.5rem 0.75rem",
+                                borderBottom: "1px solid #e5e7eb",
+                                fontSize: "0.9rem",
+                            }}
+                        >
+                            <div style={{ fontWeight: 600 }}>{acc.staff_id}</div>
+
+                            <div>
+                                <div>{acc.full_name || "—"}</div>
+                                <div style={{ opacity: 0.6 }}>{acc.email}</div>
+                            </div>
+
+                            <div style={{ textTransform: "capitalize" }}>{acc.role}</div>
+
+                            <div style={{ display: "flex", gap: "0.25rem" }}>
+                                <button style={secondaryButtonStyle} onClick={() => alert("Edit")}>
+                                    Edit
+                                </button>
+                                <button style={secondaryButtonStyle} onClick={() => alert("Reset password")}>
+                                    Reset
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Modal for creating account */}
+                {modalOpen && (
+                    <div
+                        style={{
+                            position: "fixed",
+                            top: 0, left: 0, right: 0, bottom: 0,
+                            backgroundColor: "rgba(0,0,0,0.3)",
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
                         }}
                     >
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <div>
-                                <h4 style={{ margin: 0 }}>
-                                    {acc.email}
-                                </h4>
-                                <p style={{ margin: "0.25rem 0", opacity: 0.7 }}>
-                                    Role: {acc.role}
-                                </p>
-                            </div>
+                        <div style={{ backgroundColor: "#fff", padding: "1.5rem", borderRadius: 6, width: 400 }}>
+                            <h3 style={{ marginTop: 0 }}>Create Account</h3>
+                            <form onSubmit={handleCreateAccount} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                                <input
+                                    type="email"
+                                    placeholder="Email"
+                                    value={newAccountData.email}
+                                    onChange={e => setNewAccountData(prev => ({ ...prev, email: e.target.value }))}
+                                    required
+                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Full Name"
+                                    value={newAccountData.full_name}
+                                    onChange={e => setNewAccountData(prev => ({ ...prev, full_name: e.target.value }))}
+                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
+                                />
+                                <select
+                                    value={newAccountData.role}
+                                    onChange={e => setNewAccountData(prev => ({ ...prev, role: e.target.value }))}
+                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
+                                >
+                                    <option value="operator">Operator</option>
+                                    <option value="administration">Administration</option>
+                                </select>
+                                <input
+                                    type="text"
+                                    placeholder="Role Variant (optional)"
+                                    value={newAccountData.role_variant}
+                                    onChange={e => setNewAccountData(prev => ({ ...prev, role_variant: e.target.value }))}
+                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
+                                />
 
-                            <div style={{ fontWeight: 700 }}>
-                                {acc.misaligned ? "⚠ MISALIGNED" : "✓ OK"}
-                            </div>
-                        </div>
+                                <button type="submit" style={primaryButtonStyle}>Create</button>
+                                <button type="button" style={secondaryButtonStyle} onClick={() => setModalOpen(false)}>Cancel</button>
+                            </form>
 
-                        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-                            <button
-                                style={secondaryButtonStyle}
-                                onClick={() => alert("Edit details (safe fields only)")}
-                            >
-                                Edit
-                            </button>
-
-                            <button
-                                style={secondaryButtonStyle}
-                                onClick={() => alert("Reset password → Admin API")}
-                            >
-                                Reset Password
-                            </button>
-
-                            <button
-                                style={{
-                                    ...secondaryButtonStyle,
-                                    backgroundColor: "#fee2e2",
-                                }}
-                                onClick={() => alert("Delete account → Edge Function")}
-                            >
-                                Delete
-                            </button>
+                            {/* Show generated credentials */}
+                            {creationResult && (
+                                <div style={{ marginTop: "1rem", backgroundColor: "#f3f4f6", padding: "0.75rem", borderRadius: 4 }}>
+                                    <p><strong>Staff ID:</strong> {creationResult.staff_id}</p>
+                                    <p><strong>Password:</strong> {creationResult.password}</p>
+                                    <p><strong>Email:</strong> {creationResult.email}</p>
+                                </div>
+                            )}
                         </div>
                     </div>
-                ))}
+                )}
             </div>
-        </div>
-    );
+        );
+    };
+
+
 
 
     const renderClientManagement = () => {
