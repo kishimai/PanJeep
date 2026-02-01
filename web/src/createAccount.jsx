@@ -27,35 +27,36 @@ function generateTempPassword(length = 8) {
 
 
 export async function createAccount({ email, full_name, role, role_variant }) {
-    const staff_id = generateStaffId(role);
-    const password = generateTempPassword();
-
     try {
-        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-account`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({ email, full_name, role, role_variant }),
-        });
+        const res = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-account`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({ email, full_name, role, role_variant }),
+            }
+        );
+
+        const data = await res.json(); // ✅ ONLY ONCE
 
         if (!res.ok) {
-            let errMsg = "Unknown error creating account";
-            try {
-                const data = await res.json();
-                errMsg = data.error || errMsg;
-            } catch {}
-            throw new Error(errMsg);
+            throw new Error(data?.error || "Unknown error creating account");
         }
 
-        const data = await res.json();
-        return { staff_id: data.staff_id, password: data.password, email: data.email };
+        return {
+            staff_id: data.staff_id,
+            password: data.password,
+            email: data.email,
+        };
     } catch (err) {
         console.error("Create Account failed:", err);
         throw err;
     }
 }
+
 
 
 

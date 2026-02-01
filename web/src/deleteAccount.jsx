@@ -5,14 +5,17 @@ export async function deleteAccount(user_id) {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${session.access_token}`,
+                Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
             },
             body: JSON.stringify({ user_id }),
         }
     );
 
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
+
+    if (!res.ok) {
+        throw new Error(data?.error || "Failed to delete account");
+    }
 
     return data;
 }
