@@ -17,6 +17,7 @@ const haversineDistance = ([lat1, lon1], [lat2, lon2]) => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
+
 const estimateLength = (points = []) => {
     if (!points || points.length < 2) return 0;
     let total = 0;

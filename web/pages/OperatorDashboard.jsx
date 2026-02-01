@@ -1,18 +1,26 @@
 import { useState, useEffect } from "react";
 import { RouteEditor } from "../src/RouteEditor.jsx";
 import { supabase } from "../src/supabase.jsx";
-import {WidthFull} from "@mui/icons-material";
-import {RouteManager} from "../src/RouteManager.jsx";
-import {Routes} from "react-router-dom";
-import { createAccount }  from "../src/createAccount.jsx";
+import { RouteManager } from "../src/RouteManager.jsx";
+import { createAccount } from "../src/createAccount.jsx";
+import { fetchAccounts } from "../src/fetchAccounts.jsx";
+import { deleteAccount } from "../src/deleteAccount.jsx";
+import { editAccount } from "../src/editAccount.jsx";
 
 export function OperatorDashboard({ profile }) {
-    const operatorTabs = ["Summary", "Route Overview", "Driver Onboarding", "Support Tickets", "Data Quality", "Account Management", "Client Management"];
+    const operatorTabs = [
+        "Summary",
+        "Route Overview",
+        "Driver Onboarding",
+        "Support Tickets",
+        "Data Quality",
+        "Account Management",
+        "Client Management",
+    ];
     const [activeTab, setActiveTab] = useState("Home");
 
     const [regions, setRegions] = useState([]);
     const [selectedRegionId, setSelectedRegionId] = useState("");
-
     const [isCreatingRegion, setIsCreatingRegion] = useState(false);
     const [clientStep, setClientStep] = useState(1);
 
@@ -32,8 +40,12 @@ export function OperatorDashboard({ profile }) {
         secondaryAdminEmail: "",
     });
 
-    // Account Management UI state (MOVED OUT OF renderAccountManagement)
+    // --- Accounts ---
+    const [accounts, setAccounts] = useState([]);
+    const [accountsLoading, setAccountsLoading] = useState(true);
+    const [accountsError, setAccountsError] = useState(null);
     const [searchId, setSearchId] = useState("");
+
     const [modalOpen, setModalOpen] = useState(false);
     const [newAccountData, setNewAccountData] = useState({
         email: "",
@@ -42,86 +54,47 @@ export function OperatorDashboard({ profile }) {
         role_variant: "",
     });
     const [creationResult, setCreationResult] = useState(null);
+    const [creationLoading, setCreationLoading] = useState(false);
+    const [creationError, setCreationError] = useState(null);
+
+    const [editingAccount, setEditingAccount] = useState(null);
+    const [editForm, setEditForm] = useState({
+        full_name: "",
+        role: "operator",
+        role_variant: "",
+    });
 
     const updateLguForm = (field, value) => {
-        setLguForm(prev => ({ ...prev, [field]: value }));
+        setLguForm((prev) => ({ ...prev, [field]: value }));
     };
-
-    const [accounts, setAccounts] = useState([]);
-    const [accountsLoading, setAccountsLoading] = useState(true);
-    const [accountsError, setAccountsError] = useState(null);
-
 
     useEffect(() => {
         const fetchRegions = async () => {
             const { data, error } = await supabase.from("regions").select("*");
             if (error) return console.error(error);
             setRegions(data);
-
-            if (error) {
-                console.error("Failed to fetch regions:", error);
-            }
-
-            setSelectedRegionId(data)
+            if (data?.length > 0) setSelectedRegionId(data[0].id);
         };
-
-
 
         fetchRegions();
     }, []);
 
     useEffect(() => {
-        fetchAccounts();
+        reloadAccounts();
     }, []);
 
-    const fetchAccounts = async () => {
+    const reloadAccounts = async () => {
         setAccountsLoading(true);
-        setAccountsError(null);
-
-        try {
-            const { data: users, error: userError } = await supabase
-                .from("users")
-                .select("id, email, role");
-
-            if (userError) throw userError;
-
-            const { data: operators } = await supabase
-                .from("operators")
-                .select("id");
-
-            const { data: admins } = await supabase
-                .from("administration")
-                .select("id");
-
-            const operatorSet = new Set(operators?.map(o => o.id));
-            const adminSet = new Set(admins?.map(a => a.id));
-
-            const merged = users.map(u => {
-                let misaligned = false;
-
-                if (u.role === "operator" && !operatorSet.has(u.id)) {
-                    misaligned = true;
-                }
-
-                if (u.role === "administration" && !adminSet.has(u.id)) {
-                    misaligned = true;
-                }
-
-                return {
-                    ...u,
-                    misaligned,
-                };
-            });
-
-            setAccounts(merged);
-        } catch (err) {
-            console.error(err);
-            setAccountsError("Failed to load accounts");
-        } finally {
-            setAccountsLoading(false);
-        }
+        const { data, error } = await supabase
+            .from("users")
+            .select("*")
+            .order("created_at", { ascending: false });
+        if (error) setAccountsError(error.message);
+        else setAccounts(data);
+        setAccountsLoading(false);
     };
 
+    // --- Render Helpers ---
     const renderHome = () => (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
             <div style={cardStyle}>
@@ -129,13 +102,11 @@ export function OperatorDashboard({ profile }) {
                 <p>Drivers: 12</p>
                 <p>Users: 24</p>
             </div>
-
             <div style={cardStyle}>
                 <h3>Routes Needing Setup</h3>
                 <p>Region A: 3</p>
                 <p>Region B: 1</p>
             </div>
-
             <div style={cardStyle}>
                 <h3>Open Support Tickets</h3>
                 <p>Tickets: 6</p>
@@ -144,9 +115,7 @@ export function OperatorDashboard({ profile }) {
         </div>
     );
 
-    function renderRoutes() {
-        return <RouteManager />
-    }
+    const renderRoutes = () => <RouteManager />;
 
     const renderOnboarding = () => (
         <div>
@@ -169,37 +138,13 @@ export function OperatorDashboard({ profile }) {
         </div>
     );
 
-    const filteredAccounts = accounts.filter(acc =>
+    const filteredAccounts = accounts.filter((acc) =>
         (acc.staff_id ?? "").toLowerCase().includes((searchId ?? "").toLowerCase())
     );
 
     const renderAccountManagement = () => {
-
-        const filteredAccounts = accounts.filter(acc =>
-            (acc.staff_id ?? "").toLowerCase().includes((searchId ?? "").toLowerCase())
-        );
-
-        const handleCreateAccount = async (e) => {
-            e.preventDefault();
-            setCreationResult(null);
-
-            try {
-                const data = await createAccount(newAccountData);
-                setCreationResult(data);
-
-                // Refresh accounts list automatically
-                setAccounts(prev => [...prev, { ...newAccountData, ...data, id: data.staff_id }]);
-                setModalOpen(false);
-                // Reset form
-                setNewAccountData({ email: "", full_name: "", role: "operator", role_variant: "" });
-            } catch (err) {
-                setAccountsError(err.message);
-            }
-        };
-
         return (
             <div>
-                {/* Top actions */}
                 <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
                     <button style={primaryButtonStyle} onClick={() => setModalOpen(true)}>
                         + Create Account
@@ -209,30 +154,22 @@ export function OperatorDashboard({ profile }) {
                         type="text"
                         placeholder="Search by Staff ID"
                         value={searchId}
-                        onChange={e => setSearchId(e.target.value)}
-                        style={{
-                            padding: "0.5rem",
-                            border: "1px solid #ccc",
-                            borderRadius: 4,
-                            width: 220,
-                        }}
+                        onChange={(e) => setSearchId(e.target.value)}
+                        style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4, width: 220 }}
                     />
                 </div>
 
                 {accountsLoading && <p>Loading accounts…</p>}
                 {accountsError && <p style={{ color: "red" }}>{accountsError}</p>}
-                {!accountsLoading && filteredAccounts.length === 0 && (
-                    <p>No accounts found.</p>
-                )}
+                {!accountsLoading && filteredAccounts.length === 0 && <p>No accounts found.</p>}
 
-                {/* List */}
                 <div style={{ border: "1px solid #e5e7eb" }}>
-                    {filteredAccounts.map(acc => (
+                    {filteredAccounts.map((acc) => (
                         <div
                             key={acc.id}
                             style={{
                                 display: "grid",
-                                gridTemplateColumns: "140px 1fr 160px 120px",
+                                gridTemplateColumns: "140px 0.9fr 160px 120px",
                                 alignItems: "center",
                                 padding: "0.5rem 0.75rem",
                                 borderBottom: "1px solid #e5e7eb",
@@ -242,291 +179,179 @@ export function OperatorDashboard({ profile }) {
                             <div style={{ fontWeight: 600 }}>{acc.staff_id}</div>
 
                             <div>
-                                <div>{acc.full_name || "—"}</div>
+                                <div>
+                                    <strong>{acc.full_name || "—"}</strong>
+                                </div>
                                 <div style={{ opacity: 0.6 }}>{acc.email}</div>
+                                <div style={{ fontSize: "0.75rem", opacity: 0.6 }}>
+                                    Created: {new Date(acc.created_at).toLocaleDateString()}
+                                </div>
                             </div>
 
                             <div style={{ textTransform: "capitalize" }}>{acc.role}</div>
 
                             <div style={{ display: "flex", gap: "0.25rem" }}>
-                                <button style={secondaryButtonStyle} onClick={() => alert("Edit")}>
+                                <button
+                                    style={secondaryButtonStyle}
+                                    onClick={() => {
+                                        setEditingAccount(acc);
+                                        setEditForm({
+                                            full_name: acc.full_name || "",
+                                            role: acc.role,
+                                            role_variant: acc.role_variant || "",
+                                        });
+                                    }}
+                                >
                                     Edit
                                 </button>
                                 <button style={secondaryButtonStyle} onClick={() => alert("Reset password")}>
                                     Reset
                                 </button>
+                                <button
+                                    style={secondaryButtonStyle}
+                                    onClick={async () => {
+                                        if (!confirm("Delete this account?")) return;
+                                        await deleteAccount(acc.id);
+                                        await reloadAccounts();
+                                    }}
+                                >
+                                    Delete
+                                </button>
                             </div>
                         </div>
                     ))}
                 </div>
-
-                {/* Modal for creating account */}
-                {modalOpen && (
-                    <div
-                        style={{
-                            position: "fixed",
-                            top: 0, left: 0, right: 0, bottom: 0,
-                            backgroundColor: "rgba(0,0,0,0.3)",
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                        }}
-                    >
-                        <div style={{ backgroundColor: "#fff", padding: "1.5rem", borderRadius: 6, width: 400 }}>
-                            <h3 style={{ marginTop: 0 }}>Create Account</h3>
-                            <form onSubmit={handleCreateAccount} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                                <input
-                                    type="email"
-                                    placeholder="Email"
-                                    value={newAccountData.email}
-                                    onChange={e => setNewAccountData(prev => ({ ...prev, email: e.target.value }))}
-                                    required
-                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
-                                />
-                                <input
-                                    type="text"
-                                    placeholder="Full Name"
-                                    value={newAccountData.full_name}
-                                    onChange={e => setNewAccountData(prev => ({ ...prev, full_name: e.target.value }))}
-                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
-                                />
-                                <select
-                                    value={newAccountData.role}
-                                    onChange={e => setNewAccountData(prev => ({ ...prev, role: e.target.value }))}
-                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
-                                >
-                                    <option value="operator">Operator</option>
-                                    <option value="administration">Administration</option>
-                                </select>
-                                <input
-                                    type="text"
-                                    placeholder="Role Variant (optional)"
-                                    value={newAccountData.role_variant}
-                                    onChange={e => setNewAccountData(prev => ({ ...prev, role_variant: e.target.value }))}
-                                    style={{ padding: "0.5rem", border: "1px solid #ccc", borderRadius: 4 }}
-                                />
-
-                                <button type="submit" style={primaryButtonStyle}>Create</button>
-                                <button type="button" style={secondaryButtonStyle} onClick={() => setModalOpen(false)}>Cancel</button>
-                            </form>
-
-                            {/* Show generated credentials */}
-                            {creationResult && (
-                                <div style={{ marginTop: "1rem", backgroundColor: "#f3f4f6", padding: "0.75rem", borderRadius: 4 }}>
-                                    <p><strong>Staff ID:</strong> {creationResult.staff_id}</p>
-                                    <p><strong>Password:</strong> {creationResult.password}</p>
-                                    <p><strong>Email:</strong> {creationResult.email}</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
             </div>
         );
     };
 
+    // --- Modal Component for Create Account ---
+    const renderCreateAccountModal = () => {
+        if (!modalOpen) return null;
 
+        const handleCreate = async (e) => {
+            e.preventDefault();
+            setCreationError(null);
+            setCreationResult(null);
+            setCreationLoading(true);
 
-
-    const renderClientManagement = () => {
-        if (isCreatingRegion) {
-            return renderRegionCreationFlow();
-        }
+            try {
+                const result = await createAccount(newAccountData);
+                setCreationResult(result);
+                await reloadAccounts();
+            } catch (err) {
+                setCreationError(err.message || "Failed to create account.");
+            } finally {
+                setCreationLoading(false);
+            }
+        };
 
         return (
-            <div>
-                {/* Header Action */}
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem", width: "20%" }}>
-                    <button
-                        style={primaryButtonStyle}
-                        onClick={() => {
-                            setClientStep(1);
-                            setIsCreatingRegion(true);
-                        }}
-                    >
-                        Create Transportation Region
-                    </button>
-                </div>
+            <div style={modalBackdropStyle}>
+                <div style={modalStyle}>
+                    <h3>Create Account</h3>
+                    <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        <input
+                            type="email"
+                            placeholder="Email"
+                            value={newAccountData.email}
+                            onChange={(e) => setNewAccountData((prev) => ({ ...prev, email: e.target.value }))}
+                            required
+                            style={inputStyle}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Full Name"
+                            value={newAccountData.full_name}
+                            onChange={(e) => setNewAccountData((prev) => ({ ...prev, full_name: e.target.value }))}
+                            style={inputStyle}
+                        />
+                        <select
+                            value={newAccountData.role}
+                            onChange={(e) => setNewAccountData((prev) => ({ ...prev, role: e.target.value }))}
+                            style={inputStyle}
+                        >
+                            <option value="operator">Operator</option>
+                            <option value="administration">Administration</option>
+                        </select>
+                        <input
+                            type="text"
+                            placeholder="Role Variant (optional)"
+                            value={newAccountData.role_variant}
+                            onChange={(e) => setNewAccountData((prev) => ({ ...prev, role_variant: e.target.value }))}
+                            style={inputStyle}
+                        />
 
-                {/* Client List */}
-                <div style={{ display: "grid", gap: "1rem" }}>
-                    {regions.length === 0 && (
-                        <div style={cardStyle}>
-                            <p>No LGU regions onboarded yet.</p>
+                        {creationError && <p style={{ color: "red" }}>{creationError}</p>}
+
+                        <button type="submit" style={primaryButtonStyle} disabled={creationLoading}>
+                            {creationLoading ? "Creating…" : "Create"}
+                        </button>
+                        <button type="button" style={secondaryButtonStyle} onClick={() => setModalOpen(false)}>
+                            Cancel
+                        </button>
+                    </form>
+
+                    {creationResult && (
+                        <div style={{ marginTop: "1rem", backgroundColor: "#f3f4f6", padding: "0.75rem", borderRadius: 4 }}>
+                            <p>
+                                <strong>Staff ID:</strong> {creationResult.staff_id}
+                            </p>
+                            <p>
+                                <strong>Password:</strong> {creationResult.password}
+                            </p>
+                            <p>
+                                <strong>Email:</strong> {creationResult.email}
+                            </p>
                         </div>
                     )}
-
-                    {regions.map(region => (
-                        <div key={region.id} style={cardStyle}>
-                            <h3>{region.name}</h3>
-
-                            <p style={{ opacity: 0.7 }}>
-                                Status: Digitization in progress
-                            </p>
-
-                            <div style={{ display: "flex", gap: "0.5rem" }}>
-                                <button style={secondaryButtonStyle}>
-                                    View
-                                </button>
-                                <button style={secondaryButtonStyle}>
-                                    Continue Digitization
-                                </button>
-                            </div>
-                        </div>
-                    ))}
                 </div>
             </div>
         );
     };
 
-    const renderRegionCreationFlow = () => (
-        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
-
-            {/* Wizard Header */}
-            <div style={{ marginBottom: "1rem" }}>
-                <button
-                    style={{ ...secondaryButtonStyle, width: "auto" }}
-                    onClick={() => setIsCreatingRegion(false)}
-                >
-                    ← Back to Clients
-                </button>
-            </div>
-
-            <div style={{ marginBottom: "1rem", opacity: 0.7 }}>
-                Step {clientStep} of 3
-            </div>
-
-            {/* IDENTITY */}
-            {clientStep === 1 && (
-                <div style={cardStyle}>
-                    <h2>LGU Legal Identity & Jurisdiction</h2>
-
-                    <select
-                        style={inputStyle}
-                        onChange={e => updateLguForm("lguType", e.target.value)}
-                    >
-                        <option value="">Select LGU Type</option>
-                        <option>Province</option>
-                        <option>City</option>
-                        <option>Municipality</option>
+    // --- Modal Component for Editing Account ---
+    const renderEditAccountModal = () => {
+        if (!editingAccount) return null;
+        return (
+            <div style={modalBackdropStyle}>
+                <div style={modalStyle}>
+                    <h3>Edit Account</h3>
+                    <input
+                        placeholder="Full Name"
+                        value={editForm.full_name}
+                        onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
+                    />
+                    <select value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}>
+                        <option value="operator">Operator</option>
+                        <option value="administration">Administration</option>
                     </select>
-
                     <input
-                        placeholder="Official LGU Name (e.g. City Government of Angeles)"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("officialName", e.target.value)}
+                        placeholder="Role Variant (optional)"
+                        value={editForm.role_variant}
+                        onChange={(e) => setEditForm({ ...editForm, role_variant: e.target.value })}
                     />
-
-                    <input
-                        placeholder="PSGC Code"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("psgcCode", e.target.value)}
-                    />
-
-                    <input
-                        placeholder="Administrative Region (e.g. Region III)"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("region", e.target.value)}
-                    />
-
-                    <input
-                        placeholder="Barangays Covered (comma-separated)"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("barangays", e.target.value)}
-                    />
+                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+                        <button
+                            style={primaryButtonStyle}
+                            onClick={async () => {
+                                await editAccount({ user_id: editingAccount.id, ...editForm });
+                                setEditingAccount(null);
+                                await reloadAccounts();
+                            }}
+                        >
+                            Save
+                        </button>
+                        <button style={secondaryButtonStyle} onClick={() => setEditingAccount(null)}>
+                            Cancel
+                        </button>
+                    </div>
                 </div>
-            )}
-
-            {/* AUTHORITY */}
-            {clientStep === 2 && (
-                <div style={cardStyle}>
-                    <h2>Legal Authority & Authorization</h2>
-
-                    <input
-                        placeholder="Authorizing Office (e.g. Mayor’s Office)"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("authorizingOffice", e.target.value)}
-                    />
-
-                    <select
-                        style={inputStyle}
-                        onChange={e => updateLguForm("legalBasis", e.target.value)}
-                    >
-                        <option value="">Select Legal Basis</option>
-                        <option>Executive Order</option>
-                        <option>City Ordinance</option>
-                        <option>Memorandum of Agreement</option>
-                        <option>Pilot Authorization</option>
-                    </select>
-
-                    <input
-                        placeholder="Reference Number (e.g. EO No. 12 s. 2024)"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("referenceNumber", e.target.value)}
-                    />
-
-                    <input
-                        type="date"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("effectiveDate", e.target.value)}
-                    />
-                </div>
-            )}
-
-            {/* OFFICIALS */}
-            {clientStep === 3 && (
-                <div style={cardStyle}>
-                    <h2>LGU Officials & Administrator Accounts</h2>
-
-                    <input
-                        placeholder="Primary Official Name"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("primaryAdminName", e.target.value)}
-                    />
-
-                    <input
-                        placeholder="Position Title (e.g. City Transport Officer)"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("primaryAdminPosition", e.target.value)}
-                    />
-
-                    <input
-                        placeholder="Official Email"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("primaryAdminEmail", e.target.value)}
-                    />
-
-                    <input
-                        placeholder="Secondary / Backup Email"
-                        style={inputStyle}
-                        onChange={e => updateLguForm("secondaryAdminEmail", e.target.value)}
-                    />
-                </div>
-            )}
-
-            {/* Wizard Controls */}
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1rem" }}>
-                <button
-                    disabled={clientStep === 1}
-                    style={secondaryButtonStyle}
-                    onClick={() => setClientStep(s => s - 1)}
-                >
-                    Back
-                </button>
-
-                <button
-                    disabled={clientStep === 3}
-                    style={primaryButtonStyle}
-                    onClick={() => setClientStep(s => s + 1)}
-                >
-                    Continue
-                </button>
             </div>
-        </div>
-    );
+        );
+    };
 
-
-
+    // --- Content switch ---
     const renderContent = () => {
         switch (activeTab) {
             case "Summary":
@@ -553,7 +378,6 @@ export function OperatorDashboard({ profile }) {
             {/* Sidebar */}
             <aside style={sidebarStyle}>
                 <h2 style={{ marginBottom: "2rem", fontSize: "1.3rem", fontWeight: 700 }}>Operator</h2>
-
                 <nav style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                     {operatorTabs.map((tab, i) => (
                         <button
@@ -578,15 +402,18 @@ export function OperatorDashboard({ profile }) {
 
             {/* Main Content */}
             <main style={mainStyle}>
-                <header style={headerStyle}>
-                </header>
-
+                <header style={headerStyle}></header>
                 <section style={{ marginTop: "1rem" }}>{renderContent()}</section>
             </main>
+
+            {/* Modals */}
+            {renderCreateAccountModal()}
+            {renderEditAccountModal()}
         </div>
     );
 }
 
+// --- Styles (unchanged) ---
 const sidebarStyle = {
     width: "240px",
     backgroundColor: "#1f2937",
@@ -595,51 +422,11 @@ const sidebarStyle = {
     flexDirection: "column",
     padding: "1rem",
 };
-
-const mainStyle = {
-    flex: 1,
-    padding: "1rem 2rem",
-    overflowY: "auto",
-    backgroundColor: "#f3f4f6",
-};
-
-const headerStyle = {
-    display: "flex",
-    justifyContent: "space-between",
-    marginBottom: "1.5rem",
-};
-
-const cardStyle = {
-    backgroundColor: "#fff",
-    borderRadius: "12px",
-    padding: "1rem",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-};
-
-const inputStyle = {
-    width: "80vh",
-    padding: "0.5rem",
-    marginBottom: "0.5rem",
-    borderRadius: "8px",
-    border: "1px solid #d1d5db",
-};
-
-const primaryButtonStyle = {
-    width: "100%",
-    padding: "0.5rem",
-    backgroundColor: "#2563eb",
-    color: "#fff",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-};
-
-const secondaryButtonStyle = {
-    width: "100%",
-    padding: "0.5rem",
-    backgroundColor: "#e5e7eb",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-};
-
+const mainStyle = { flex: 1, padding: "1rem 2rem", overflowY: "auto", backgroundColor: "#f3f4f6" };
+const headerStyle = { display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" };
+const cardStyle = { backgroundColor: "#fff", borderRadius: "12px", padding: "1rem", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" };
+const inputStyle = { width: "100%", padding: "0.5rem", marginBottom: "0.5rem", borderRadius: "8px", border: "1px solid #d1d5db" };
+const primaryButtonStyle = { width: "100%", padding: "0.5rem", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer" };
+const secondaryButtonStyle = { width: "100%", padding: "0.5rem", backgroundColor: "#e5e7eb", border: "none", borderRadius: "8px", cursor: "pointer" };
+const modalBackdropStyle = { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.3)", display: "flex", justifyContent: "center", alignItems: "center" };
+const modalStyle = { backgroundColor: "#fff", padding: "1.5rem", borderRadius: 6, width: 400 };
