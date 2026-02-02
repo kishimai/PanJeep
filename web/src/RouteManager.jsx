@@ -1,23 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import mapboxgl from "mapbox-gl";
-import { RouteEditor } from "./RouteEditor.jsx";
-
-/* ---------------- Helpers ---------------- */
-
-
-
-
-const estimateLength = (points = []) => {
-    if (points.length < 2) return 0;
-    let total = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-        total += haversineDistance(
-            [points[i][1], points[i][0]],
-            [points[i + 1][1], points[i + 1][0]]
-        );
-    }
-    return total.toFixed(2);
-}
+import { RouteEditor } from "../src/RouteEditor.jsx";
 
 /* ---------------- Route Manager ---------------- */
 

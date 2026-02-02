@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import AccountManagement from "../src/AccountManagement";
-import RouteEditor from "../src/RouteEditor.jsx";
+import {RouteManager} from "../src/RouteManager.jsx";
 
 export function OperatorDashboard({ profile }) {
     const operatorTabs = [
@@ -44,7 +44,7 @@ export function OperatorDashboard({ profile }) {
                 <header style={headerStyle}></header>
                 <section style={{ marginTop: "1rem" }}>
                     {activeTab === "Account Management" && <AccountManagement />}
-                    {activeTab === "Route Overview" && <RouteEditor />}
+                    {activeTab === "Route Overview" && <RouteManager />}
                 </section>
             </main>
         </div>
