@@ -15,7 +15,7 @@ import { supabase } from "../src/supabase.jsx";
 import { useNavigate } from "react-router-dom";
 
 export default function Login() {
-    const [email, setEmail] = useState("");
+    const [identifier, setIdentifier] = useState(""); // email or staff ID
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
 
@@ -26,14 +26,31 @@ export default function Login() {
         setLoading(true);
 
         try {
-            /* 1. Authenticate via Supabase */
+            let emailToUse = identifier.trim();
+
+            // 1️⃣ Check if input is staff ID (does not contain @)
+            if (!emailToUse.includes("@")) {
+                const { data: userRecord, error: userError } = await supabase
+                    .from("users")
+                    .select("email")
+                    .eq("staff_id", emailToUse)
+                    .maybeSingle();
+
+                if (userError || !userRecord) {
+                    alert("Staff ID not found");
+                    setLoading(false);
+                    return;
+                }
+
+                emailToUse = userRecord.email;
+            }
+
+            // 2️⃣ Authenticate via Supabase
             const { data: authData, error: authError } =
                 await supabase.auth.signInWithPassword({
-                    email,
+                    email: emailToUse,
                     password,
                 });
-
-            console.log({authData});
 
             if (authError || !authData.user) {
                 alert(authError?.message || "Login failed");
@@ -43,14 +60,14 @@ export default function Login() {
 
             const userId = authData.user.id;
 
-            /* 2. Fetch base user (role gate) */
-            const { data: userData, error: userError } = await supabase
+            // 3️⃣ Fetch base user (role gate)
+            const { data: userData, error: userError2 } = await supabase
                 .from("users")
                 .select("id, role, email")
                 .eq("id", userId)
-                .maybeSingle()
+                .maybeSingle();
 
-            if (userError || !userData) {
+            if (userError2 || !userData) {
                 alert("User record not found");
                 setLoading(false);
                 return;
@@ -62,7 +79,7 @@ export default function Login() {
                 return;
             }
 
-            /* 3. Fetch role profile (PK-as-FK) */
+            // 4️⃣ Fetch role profile (PK-as-FK)
             const roleTable =
                 userData.role === "administration" ? "administration" : "operators";
 
@@ -78,9 +95,10 @@ export default function Login() {
                 return;
             }
 
-            /* 4. Success */
+            // 5️⃣ Success
             setLoading(false);
             navigate("/dashboard");
+
         } catch (err) {
             console.error(err);
             alert("Unexpected error occurred");
@@ -114,10 +132,10 @@ export default function Login() {
                     sx={{ display: "flex", flexDirection: "column", gap: 2 }}
                 >
                     <TextField
-                        label="Email"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        label="Email or Staff ID"
+                        type="text"
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
                         required
                         InputProps={{
                             startAdornment: (

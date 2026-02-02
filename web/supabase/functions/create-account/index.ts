@@ -17,7 +17,7 @@ function generateStaffId(role = "OP") {
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
     const random = Math.floor(Math.random() * 9000 + 1000);
-    return `${role.toUpperCase()}-${y}${m}${d}-${random}`;
+    return `${random}${y}${m}${d}`;
 }
 
 function generateTempPassword(length = 8) {
@@ -36,18 +36,22 @@ Deno.serve(async (req) => {
         const staff_id = generateStaffId(role);
         const password = generateTempPassword();
 
+        // ✅ Create user in auth.users with email auto-verified
         const { data: authData, error: authError } = await supabase.auth.admin.createUser({
             email,
             password,
+            email_confirm: true, // <-- auto-verify email
             user_metadata: { full_name, role, staff_id, phone },
         });
         if (authError) throw authError;
 
+        // Insert into public.users table
         const { error: userError } = await supabase.from("users").insert([
             { id: authData.user.id, email, full_name, phone, role, staff_id },
         ]);
         if (userError) throw userError;
 
+        // Role-specific table insertion
         if (role === "operator") {
             const { error: opError } = await supabase.from("operators").insert([
                 { id: authData.user.id, role_variant: role_variant || null },
