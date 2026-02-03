@@ -5,8 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="95799381-6873-48b5-bb43-e4c3cbcab23a" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(tabs)/profile.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(tabs)/routes.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/supabase.js" beforeDir="false" afterPath="$PROJECT_DIR$/lib/supabase.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../web/.env" beforeDir="false" afterPath="$PROJECT_DIR$/../web/.env" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -24,31 +28,31 @@
   <component name="GitHubPullRequestSearchHistory">{
   &quot;lastFilter&quot;: {}
 }</component>
-  <component name="GitHubPullRequestState"><![CDATA[{
-  "prStates": [
+  <component name="GitHubPullRequestState">{
+  &quot;prStates&quot;: [
     {
-      "id": {
-        "id": "PR_kwDOQXbZGs7BPUlU",
-        "number": 2
+      &quot;id&quot;: {
+        &quot;id&quot;: &quot;PR_kwDOQXbZGs7BPUlU&quot;,
+        &quot;number&quot;: 2
       },
-      "lastSeen": 1770137055028
+      &quot;lastSeen&quot;: 1770137055028
     },
     {
-      "id": {
-        "id": "PR_kwDOQXbZGs7BPao9",
-        "number": 3
+      &quot;id&quot;: {
+        &quot;id&quot;: &quot;PR_kwDOQXbZGs7BPao9&quot;,
+        &quot;number&quot;: 3
       },
-      "lastSeen": 1770138221415
+      &quot;lastSeen&quot;: 1770138221415
     }
   ]
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/kishimai/PanJeep.git",
-    "accountId": "b6d97057-c688-4ea1-97b9-16f3dee9feeb"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/kishimai/PanJeep.git&quot;,
+    &quot;accountId&quot;: &quot;b6d97057-c688-4ea1-97b9-16f3dee9feeb&quot;
   },
-  "editorReviewEnabled": false
-}]]></component>
+  &quot;editorReviewEnabled&quot;: false
+}</component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -63,6 +67,7 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "git-widget-placeholder": "main",
     "javascript.preferred.runtime.type.id": "node",
     "last_opened_file_path": "C:/Users/Guest1/Desktop/Projects/PanJeep/eTranspo",
     "node.js.detected.package.eslint": "true",
@@ -70,7 +75,7 @@
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "ts.external.directory.path": "C:\\Program Files\\JetBrains\\WebStorm 2025.3.1\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external",
+    "ts.external.directory.path": "C:\\Users\\Guest1\\Desktop\\Projects\\PanJeep\\eTranspo\\node_modules\\typescript\\lib",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -90,20 +95,13 @@
       <updated>1770131993804</updated>
       <workItem from="1770131996422" duration="1319000" />
       <workItem from="1770134387413" duration="1693000" />
-      <workItem from="1770138208715" duration="868000" />
+      <workItem from="1770138208715" duration="1259000" />
+      <workItem from="1770139976425" duration="2807000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
-    <option name="exactExcludedFiles">
-      <list>
-        <option value="$PROJECT_DIR$/app/(tabs)/profile.jsx" />
-        <option value="$PROJECT_DIR$/app/(tabs)/routes.jsx" />
-        <option value="$PROJECT_DIR$/app/(tabs)/profile.jsx" />
-        <option value="$PROJECT_DIR$/app/(tabs)/routes.jsx" />
-      </list>
-    </option>
   </component>
   <component name="Vcs.Log.Tabs.Properties">
     <option name="OPEN_GENERIC_TABS">
@@ -111,8 +109,40 @@
         <entry key="a954face-c415-4b92-92ff-19352b509d49" value="TOOL_WINDOW" />
       </map>
     </option>
+    <option name="RECENT_FILTERS">
+      <map>
+        <entry key="Branch">
+          <value>
+            <list>
+              <RecentGroup>
+                <option name="FILTER_VALUES">
+                  <option value="HEAD" />
+                </option>
+              </RecentGroup>
+            </list>
+          </value>
+        </entry>
+      </map>
+    </option>
     <option name="TAB_STATES">
       <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="HEAD" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
         <entry key="a954face-c415-4b92-92ff-19352b509d49">
           <value>
             <State>
