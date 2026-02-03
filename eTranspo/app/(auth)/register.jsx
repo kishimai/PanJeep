@@ -1,13 +1,5 @@
 import { useState } from 'react';
-import {
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  TouchableWithoutFeedback,
-} from 'react-native';
+import { Pressable, StyleSheet, TextInput } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Link, Redirect } from 'expo-router';
 
@@ -51,68 +43,62 @@ export default function RegisterScreen() {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-      <ThemedView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardWrapper}>
-          <ThemedView style={styles.hero}>
-            <ThemedText type="title">Create account</ThemedText>
-            <ThemedText type="subtitle">Start tracking routes and cashless trips.</ThemedText>
-          </ThemedView>
-
-          <ThemedView style={styles.card}>
-            <ThemedText type="defaultSemiBold">Full name</ThemedText>
-            <TextInput
-              placeholder="Juan Dela Cruz"
-              placeholderTextColor="#94A3B8"
-              style={styles.input}
-              value={fullName}
-              onChangeText={setFullName}
-            />
-            <ThemedText type="defaultSemiBold">Email</ThemedText>
-            <TextInput
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholder="juan@email.com"
-              placeholderTextColor="#94A3B8"
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-            />
-            <ThemedText type="defaultSemiBold">Password</ThemedText>
-            <TextInput
-              placeholder="••••••••"
-              placeholderTextColor="#94A3B8"
-              secureTextEntry
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-            />
-
-            {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
-
-            <Pressable
-              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-              onPress={handleRegister}
-              disabled={loading}>
-              <ThemedText type="defaultSemiBold" style={styles.buttonText}>
-                {loading ? 'Creating…' : 'Create account'}
-              </ThemedText>
-            </Pressable>
-          </ThemedView>
-
-          <ThemedView style={styles.footer}>
-            <ThemedText>Already have an account?</ThemedText>
-            <Link href="/(auth)/login" asChild>
-              <Pressable onPress={() => Haptics.selectionAsync()}>
-                <ThemedText type="link">Sign in</ThemedText>
-              </Pressable>
-            </Link>
-          </ThemedView>
-        </KeyboardAvoidingView>
+    <ThemedView style={styles.container}>
+      <ThemedView style={styles.hero}>
+        <ThemedText type="title">Create account</ThemedText>
+        <ThemedText type="subtitle">Start tracking routes and cashless trips.</ThemedText>
       </ThemedView>
-    </TouchableWithoutFeedback>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="defaultSemiBold">Full name</ThemedText>
+        <TextInput
+          placeholder="Juan Dela Cruz"
+          placeholderTextColor="#94A3B8"
+          style={styles.input}
+          value={fullName}
+          onChangeText={setFullName}
+        />
+        <ThemedText type="defaultSemiBold">Email</ThemedText>
+        <TextInput
+          autoCapitalize="none"
+          keyboardType="email-address"
+          placeholder="juan@email.com"
+          placeholderTextColor="#94A3B8"
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+        />
+        <ThemedText type="defaultSemiBold">Password</ThemedText>
+        <TextInput
+          placeholder="••••••••"
+          placeholderTextColor="#94A3B8"
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+
+        {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
+
+        <Pressable
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          onPress={handleRegister}
+          disabled={loading}>
+          <ThemedText type="defaultSemiBold" style={styles.buttonText}>
+            {loading ? 'Creating…' : 'Create account'}
+          </ThemedText>
+        </Pressable>
+      </ThemedView>
+
+      <ThemedView style={styles.footer}>
+        <ThemedText>Already have an account?</ThemedText>
+        <Link href="/(auth)/login" asChild>
+          <Pressable onPress={() => Haptics.selectionAsync()}>
+            <ThemedText type="link">Sign in</ThemedText>
+          </Pressable>
+        </Link>
+      </ThemedView>
+    </ThemedView>
   );
 }
 
@@ -123,11 +109,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 28,
     backgroundColor: '#F1F5F9',
-  },
-  keyboardWrapper: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: 28,
   },
   hero: {
     alignItems: 'center',
