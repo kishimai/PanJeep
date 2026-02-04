@@ -82,25 +82,6 @@ const styles = StyleSheet.create({
     gap: 24,
     backgroundColor: Layout.colors.appBackground,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerSubtitle: {
-    color: Layout.colors.textMuted,
-  },
-  headerPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Layout.radii.pill,
-    backgroundColor: Layout.colors.accentSoft,
-  },
-  headerPillText: {
-    color: Layout.colors.accent,
-    fontSize: 12,
-  },
   hero: {
     gap: 16,
   },

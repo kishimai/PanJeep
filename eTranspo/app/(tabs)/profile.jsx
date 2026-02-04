@@ -87,40 +87,7 @@ const styles = StyleSheet.create({
     borderWidth: Layout.baseCard.borderWidth,
     borderColor: Layout.baseCard.borderColor,
     backgroundColor: Layout.baseCard.backgroundColor,
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  heroContent: {
-    gap: 4,
-    flex: 1,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: Layout.radii.pill,
-    backgroundColor: Layout.colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: Layout.colors.accent,
-  },
-  mutedText: {
-    color: Layout.colors.textMuted,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  statCard: {
-    flex: 1,
-    padding: 14,
-    borderRadius: Layout.radii.chip,
-    borderWidth: Layout.baseCard.borderWidth,
-    borderColor: Layout.colors.borderSubtle,
-    backgroundColor: Layout.colors.surfaceMuted,
-    gap: 4,
+    gap: 6,
   },
   card: {
     padding: 18,

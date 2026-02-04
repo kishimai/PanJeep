@@ -34,12 +34,10 @@ export default function RoutesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: Layout.spacing.screen,
-    gap: Layout.spacing.section,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
     backgroundColor: Layout.colors.appBackground,
-  },
-  header: {
-    gap: 8,
   },
   card: {
     padding: 24,
@@ -47,12 +45,11 @@ const styles = StyleSheet.create({
     borderWidth: Layout.baseCard.borderWidth,
     borderColor: Layout.baseCard.borderColor,
     backgroundColor: Layout.baseCard.backgroundColor,
+    alignItems: 'center',
     gap: 8,
   },
   subtext: {
-    color: Layout.colors.textMuted,
-  },
-  cardText: {
+    textAlign: 'center',
     color: Layout.colors.textMuted,
   },
 });

@@ -56,30 +56,25 @@ export default function LoginScreen() {
       </ThemedView>
 
       <ThemedView style={styles.card}>
-        <ThemedView style={styles.inputGroup}>
-          <ThemedText type="defaultSemiBold">Email</ThemedText>
-          <TextInput
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="juan@email.com"
-            placeholderTextColor={Layout.colors.placeholder}
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-          />
-        </ThemedView>
-
-        <ThemedView style={styles.inputGroup}>
-          <ThemedText type="defaultSemiBold">Password</ThemedText>
-          <TextInput
-            placeholder="••••••••"
-            placeholderTextColor={Layout.colors.placeholder}
-            secureTextEntry
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-          />
-        </ThemedView>
+        <ThemedText type="defaultSemiBold">Email</ThemedText>
+        <TextInput
+          autoCapitalize="none"
+          keyboardType="email-address"
+          placeholder="juan@email.com"
+          placeholderTextColor={Layout.colors.placeholder}
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+        />
+        <ThemedText type="defaultSemiBold">Password</ThemedText>
+        <TextInput
+          placeholder="••••••••"
+          placeholderTextColor={Layout.colors.placeholder}
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
 
         {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
 
@@ -114,33 +109,8 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: Layout.spacing.screen,
     justifyContent: 'center',
-    gap: 24,
+    gap: 28,
     backgroundColor: Layout.colors.appBackground,
-  },
-  brandRow: {
-    alignItems: 'center',
-    gap: Layout.spacing.compact,
-  },
-  brandBadge: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: Layout.radii.pill,
-    backgroundColor: Layout.colors.accentSoft,
-  },
-  brandText: {
-    color: Layout.colors.accent,
-    letterSpacing: 0.4,
-  },
-  brandHint: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: Layout.radii.pill,
-    backgroundColor: Layout.colors.surface,
-    borderWidth: 1,
-    borderColor: Layout.colors.borderLight,
-  },
-  brandHintText: {
-    color: Layout.colors.textMuted,
   },
   hero: {
     alignItems: 'center',
@@ -152,16 +122,12 @@ const styles = StyleSheet.create({
     borderWidth: Layout.baseCard.borderWidth,
     borderColor: Layout.baseCard.borderColor,
     backgroundColor: Layout.baseCard.backgroundColor,
-    gap: Layout.spacing.stack,
-  },
-  inputGroup: {
-    gap: Layout.spacing.compact,
+    gap: 12,
   },
   input: {
     ...Layout.baseInput,
     color: Layout.colors.textPrimary,
     backgroundColor: Layout.colors.inputBackground,
-    borderColor: Layout.colors.borderInput,
   },
   button: {
     marginTop: 6,
@@ -178,10 +144,6 @@ const styles = StyleSheet.create({
   },
   error: {
     color: Layout.colors.danger,
-  },
-  helperText: {
-    textAlign: 'center',
-    color: Layout.colors.textMuted,
   },
   footer: {
     alignItems: 'center',

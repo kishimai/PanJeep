@@ -1,24 +1,22 @@
 #!/usr/bin/env node
 
 /**
- * This script resets the project to a blank state.
- * It either deletes or archives the /app, /components, /hooks, /scripts,
- * and /constants directories to /app-example based on user input, then
- * creates a fresh /app directory with index.tsx and _layout.tsx.
+ * This script is used to reset the project to a blank state.
+ * It deletes or moves the /app, /components, /hooks, /scripts, and /constants directories to /app-example based on user input and creates a new /app directory with an index.tsx and _layout.tsx file.
+ * You can remove the `reset-project` script from package.json and safely delete this file after running it.
  */
 
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
 
-const ROOT = process.cwd();
-const OLD_DIRS = ["app", "components", "hooks", "constants", "scripts"];
-const EXAMPLE_DIR = "app-example";
-const NEW_APP_DIR = "app";
-const EXAMPLE_DIR_PATH = path.join(ROOT, EXAMPLE_DIR);
-const NEW_APP_DIR_PATH = path.join(ROOT, NEW_APP_DIR);
+const root = process.cwd();
+const oldDirs = ["app", "components", "hooks", "constants", "scripts"];
+const exampleDir = "app-example";
+const newAppDir = "app";
+const exampleDirPath = path.join(root, exampleDir);
 
-const INDEX_CONTENT = `import { Text, View } from "react-native";
+const indexContent = `import { Text, View } from "react-native";
 
 export default function Index() {
   return (
@@ -35,7 +33,7 @@ export default function Index() {
 }
 `;
 
-const LAYOUT_CONTENT = `import { Stack } from "expo-router";
+const layoutContent = `import { Stack } from "expo-router";
 
 export default function RootLayout() {
   return <Stack />;
@@ -47,102 +45,68 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-const logNextSteps = (keepExample) => {
-  const steps = [
-    "1. Run `npx expo start` to start a development server.",
-    "2. Edit app/index.tsx to edit the main screen.",
-  ];
-
-  if (keepExample) {
-    steps.push(`3. Delete the /${EXAMPLE_DIR} directory when you're done referencing it.`);
-  }
-
-  console.log("\n✅ Project reset complete. Next steps:");
-  console.log(steps.join("\n"));
-};
-
-const ensureExampleDir = async () => {
-  await fs.promises.mkdir(EXAMPLE_DIR_PATH, { recursive: true });
-  console.log(`📁 /${EXAMPLE_DIR} directory created.`);
-};
-
-const handleExistingDir = async ({ dir, keepExample }) => {
-  const oldDirPath = path.join(ROOT, dir);
-  if (!fs.existsSync(oldDirPath)) {
-    console.log(`➡️ /${dir} does not exist, skipping.`);
-    return;
-  }
-
-  if (keepExample) {
-    const newDirPath = path.join(EXAMPLE_DIR_PATH, dir);
-    await fs.promises.rename(oldDirPath, newDirPath);
-    console.log(`➡️ /${dir} moved to /${EXAMPLE_DIR}/${dir}.`);
-    return;
-  }
-
-  await fs.promises.rm(oldDirPath, { recursive: true, force: true });
-  console.log(`❌ /${dir} deleted.`);
-};
-
-const createFreshApp = async () => {
-  await fs.promises.mkdir(NEW_APP_DIR_PATH, { recursive: true });
-  console.log("\n📁 New /app directory created.");
-
-  await fs.promises.writeFile(path.join(NEW_APP_DIR_PATH, "index.tsx"), INDEX_CONTENT);
-  console.log("📄 app/index.tsx created.");
-
-  await fs.promises.writeFile(path.join(NEW_APP_DIR_PATH, "_layout.tsx"), LAYOUT_CONTENT);
-  console.log("📄 app/_layout.tsx created.");
-};
-
-const resetProject = async ({ keepExample }) => {
-  if (keepExample) {
-    await ensureExampleDir();
-  }
-
-  for (const dir of OLD_DIRS) {
-    await handleExistingDir({ dir, keepExample });
-  }
-
-  await createFreshApp();
-  logNextSteps(keepExample);
-};
-
-const parseKeepExampleInput = (answer) => {
-  const normalized = answer.trim().toLowerCase();
-  if (!normalized) {
-    return "y";
-  }
-
-  if (normalized === "y" || normalized === "n") {
-    return normalized;
-  }
-
-  return null;
-};
-
-const promptToKeepExample = () =>
-  new Promise((resolve) => {
-    rl.question(
-      "Do you want to move existing files to /app-example instead of deleting them? (Y/n): ",
-      (answer) => resolve(parseKeepExampleInput(answer))
-    );
-  });
-
-const main = async () => {
+const moveDirectories = async (userInput) => {
   try {
-    const userInput = await promptToKeepExample();
-    if (!userInput) {
-      console.log("❌ Invalid input. Please enter 'Y' or 'N'.");
-      return;
+    if (userInput === "y") {
+      // Create the app-example directory
+      await fs.promises.mkdir(exampleDirPath, { recursive: true });
+      console.log(`📁 /${exampleDir} directory created.`);
     }
 
-    await resetProject({ keepExample: userInput === "y" });
+    // Move old directories to new app-example directory or delete them
+    for (const dir of oldDirs) {
+      const oldDirPath = path.join(root, dir);
+      if (fs.existsSync(oldDirPath)) {
+        if (userInput === "y") {
+          const newDirPath = path.join(root, exampleDir, dir);
+          await fs.promises.rename(oldDirPath, newDirPath);
+          console.log(`➡️ /${dir} moved to /${exampleDir}/${dir}.`);
+        } else {
+          await fs.promises.rm(oldDirPath, { recursive: true, force: true });
+          console.log(`❌ /${dir} deleted.`);
+        }
+      } else {
+        console.log(`➡️ /${dir} does not exist, skipping.`);
+      }
+    }
+
+    // Create new /app directory
+    const newAppDirPath = path.join(root, newAppDir);
+    await fs.promises.mkdir(newAppDirPath, { recursive: true });
+    console.log("\n📁 New /app directory created.");
+
+    // Create index.tsx
+    const indexPath = path.join(newAppDirPath, "index.tsx");
+    await fs.promises.writeFile(indexPath, indexContent);
+    console.log("📄 app/index.tsx created.");
+
+    // Create _layout.tsx
+    const layoutPath = path.join(newAppDirPath, "_layout.tsx");
+    await fs.promises.writeFile(layoutPath, layoutContent);
+    console.log("📄 app/_layout.tsx created.");
+
+    console.log("\n✅ Project reset complete. Next steps:");
+    console.log(
+      `1. Run \`npx expo start\` to start a development server.\n2. Edit app/index.tsx to edit the main screen.${
+        userInput === "y"
+          ? `\n3. Delete the /${exampleDir} directory when you're done referencing it.`
+          : ""
+      }`
+    );
   } catch (error) {
     console.error(`❌ Error during script execution: ${error.message}`);
-  } finally {
-    rl.close();
   }
 };
 
-void main();
+rl.question(
+  "Do you want to move existing files to /app-example instead of deleting them? (Y/n): ",
+  (answer) => {
+    const userInput = answer.trim().toLowerCase() || "y";
+    if (userInput === "y" || userInput === "n") {
+      moveDirectories(userInput).finally(() => rl.close());
+    } else {
+      console.log("❌ Invalid input. Please enter 'Y' or 'N'.");
+      rl.close();
+    }
+  }
+);
