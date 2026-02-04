@@ -20,9 +20,27 @@ export default function ProfileScreen() {
       </ThemedView>
 
       <ThemedView style={styles.heroCard}>
-        <ThemedText type="defaultSemiBold">Juan Dela Cruz</ThemedText>
-        <ThemedText>Daily commuter · Student fare</ThemedText>
-        <ThemedText>Preferred region: Metro Manila</ThemedText>
+        <ThemedView style={styles.avatar}>
+          <ThemedText type="defaultSemiBold" style={styles.avatarText}>
+            JD
+          </ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.heroContent}>
+          <ThemedText type="defaultSemiBold">Juan Dela Cruz</ThemedText>
+          <ThemedText style={styles.mutedText}>Daily commuter · Student fare</ThemedText>
+          <ThemedText style={styles.mutedText}>Preferred region: Metro Manila</ThemedText>
+        </ThemedView>
+      </ThemedView>
+
+      <ThemedView style={styles.statsRow}>
+        <ThemedView style={styles.statCard}>
+          <ThemedText type="defaultSemiBold">24</ThemedText>
+          <ThemedText style={styles.mutedText}>Trips this month</ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.statCard}>
+          <ThemedText type="defaultSemiBold">3</ThemedText>
+          <ThemedText style={styles.mutedText}>Saved routes</ThemedText>
+        </ThemedView>
       </ThemedView>
 
       <ThemedView style={styles.section}>
@@ -53,7 +71,7 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: Layout.spacing.screen,
     gap: 24,
     backgroundColor: Layout.colors.appBackground,
   },

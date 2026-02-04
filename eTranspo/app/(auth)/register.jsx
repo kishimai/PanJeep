@@ -45,6 +45,17 @@ export default function RegisterScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <ThemedView style={styles.brandRow}>
+        <ThemedView style={styles.brandBadge}>
+          <ThemedText type="defaultSemiBold" style={styles.brandText}>
+            eTranspo
+          </ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.brandHint}>
+          <ThemedText style={styles.brandHintText}>Create your commuter profile</ThemedText>
+        </ThemedView>
+      </ThemedView>
+
       <ThemedView style={styles.hero}>
         <ThemedText type="title">Create account</ThemedText>
         <ThemedText type="subtitle">Start tracking routes and cashless trips.</ThemedText>
@@ -89,6 +100,10 @@ export default function RegisterScreen() {
             {loading ? 'Creating…' : 'Create account'}
           </ThemedText>
         </Pressable>
+
+        <ThemedText style={styles.helperText}>
+          We’ll personalize your routes and fare options as you ride.
+        </ThemedText>
       </ThemedView>
 
       <ThemedView style={styles.footer}>

@@ -7,12 +7,24 @@ import { Layout } from '@/constants/layout';
 export default function RoutesScreen() {
   return (
     <ThemedView style={styles.container}>
-      <ThemedView style={styles.card}>
-        <ThemedText type="subtitle" style={styles.text}>
-          Routes coming soon
-        </ThemedText>
+      <ThemedView style={styles.header}>
+        <ThemedText type="title">Routes</ThemedText>
         <ThemedText style={styles.subtext}>
-          We’re preparing detailed route maps and stop data.
+          Plan trips faster with saved lines and smart suggestions.
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="defaultSemiBold">Suggested for you</ThemedText>
+        <ThemedText style={styles.cardText}>
+          Set your start and destination to unlock route options.
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="defaultSemiBold">Favorites</ThemedText>
+        <ThemedText style={styles.cardText}>
+          Save frequent routes for quick access.
         </ThemedText>
       </ThemedView>
     </ThemedView>
@@ -35,9 +47,6 @@ const styles = StyleSheet.create({
     backgroundColor: Layout.baseCard.backgroundColor,
     alignItems: 'center',
     gap: 8,
-  },
-  text: {
-    textAlign: 'center',
   },
   subtext: {
     textAlign: 'center',

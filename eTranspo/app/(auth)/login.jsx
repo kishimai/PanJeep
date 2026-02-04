@@ -39,6 +39,17 @@ export default function LoginScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <ThemedView style={styles.brandRow}>
+        <ThemedView style={styles.brandBadge}>
+          <ThemedText type="defaultSemiBold" style={styles.brandText}>
+            eTranspo
+          </ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.brandHint}>
+          <ThemedText style={styles.brandHintText}>Smart routes, calmer rides</ThemedText>
+        </ThemedView>
+      </ThemedView>
+
       <ThemedView style={styles.hero}>
         <ThemedText type="title">Welcome back</ThemedText>
         <ThemedText type="subtitle">Sign in to track routes and ride smarter.</ThemedText>
@@ -75,6 +86,10 @@ export default function LoginScreen() {
             {loading ? 'Signing in…' : 'Sign In'}
           </ThemedText>
         </Pressable>
+
+        <ThemedText style={styles.helperText}>
+          Use your commuter email to sync passes and favorite routes.
+        </ThemedText>
       </ThemedView>
 
       <ThemedView style={styles.footer}>

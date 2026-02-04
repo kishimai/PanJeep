@@ -8,6 +8,16 @@ import { Layout } from '@/constants/layout';
 export default function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
+      <ThemedView style={styles.header}>
+        <ThemedView>
+          <ThemedText type="title">Hi, commuter</ThemedText>
+          <ThemedText style={styles.headerSubtitle}>Let’s plan your next trip.</ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.headerPill}>
+          <ThemedText style={styles.headerPillText}>Live updates</ThemedText>
+        </ThemedView>
+      </ThemedView>
+
       <ThemedView style={styles.hero}>
         <Pressable
           style={({ pressed }) => [styles.searchBar, pressed && styles.cardPressed]}
@@ -34,10 +44,12 @@ export default function HomeScreen() {
           <ThemedView style={styles.snapshotCard}>
             <ThemedText type="defaultSemiBold">Active Routes</ThemedText>
             <ThemedText style={styles.cardValue}>12</ThemedText>
+            <ThemedText style={styles.cardMeta}>+2 since yesterday</ThemedText>
           </ThemedView>
           <ThemedView style={styles.snapshotCard}>
             <ThemedText type="defaultSemiBold">ETA Nearby</ThemedText>
             <ThemedText style={styles.cardValue}>3–6 min</ThemedText>
+            <ThemedText style={styles.cardMeta}>Average across terminals</ThemedText>
           </ThemedView>
         </ThemedView>
       </ThemedView>
@@ -66,7 +78,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: Layout.spacing.screen,
     gap: 24,
     backgroundColor: Layout.colors.appBackground,
   },
@@ -127,6 +139,10 @@ const styles = StyleSheet.create({
   },
   cardValue: {
     fontSize: 26,
+  },
+  cardMeta: {
+    color: Layout.colors.textMuted,
+    fontSize: 12,
   },
   cardRow: {
     flexDirection: 'row',
