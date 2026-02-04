@@ -2,6 +2,7 @@ import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Layout } from '@/constants/layout';
 
 export default function RoutesScreen() {
   return (
@@ -24,14 +25,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: Layout.colors.appBackground,
   },
   card: {
     padding: 24,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.card,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.baseCard.borderColor,
+    backgroundColor: Layout.baseCard.backgroundColor,
     alignItems: 'center',
     gap: 8,
   },
@@ -40,6 +41,6 @@ const styles = StyleSheet.create({
   },
   subtext: {
     textAlign: 'center',
-    color: '#64748B',
+    color: Layout.colors.textMuted,
   },
 });

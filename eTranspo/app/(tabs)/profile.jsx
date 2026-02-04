@@ -3,6 +3,7 @@ import * as Haptics from 'expo-haptics';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Layout } from '@/constants/layout';
 import { supabase } from '@/lib/supabase';
 
 export default function ProfileScreen() {
@@ -54,7 +55,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     gap: 24,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: Layout.colors.appBackground,
   },
   header: {
     gap: 8,
@@ -64,29 +65,29 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     padding: 18,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.card,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.baseCard.borderColor,
+    backgroundColor: Layout.baseCard.backgroundColor,
     gap: 6,
   },
   card: {
     padding: 18,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.card,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.baseCard.borderColor,
+    backgroundColor: Layout.baseCard.backgroundColor,
     gap: 6,
   },
   signOut: {
     alignItems: 'center',
     paddingVertical: 12,
-    borderRadius: 14,
+    borderRadius: Layout.radii.button,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.35)',
-    backgroundColor: '#FFFFFF',
+    borderColor: Layout.colors.borderStrong,
+    backgroundColor: Layout.colors.surface,
   },
   signOutText: {
-    color: '#0F172A',
+    color: Layout.colors.textPrimary,
   },
 });

@@ -5,6 +5,7 @@ import { Link, Redirect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Layout } from '@/constants/layout';
 import { useSupabaseSession } from '@/hooks/use-supabase-session';
 import { supabase } from '@/lib/supabase';
 
@@ -53,7 +54,7 @@ export default function RegisterScreen() {
         <ThemedText type="defaultSemiBold">Full name</ThemedText>
         <TextInput
           placeholder="Juan Dela Cruz"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={Layout.colors.placeholder}
           style={styles.input}
           value={fullName}
           onChangeText={setFullName}
@@ -63,7 +64,7 @@ export default function RegisterScreen() {
           autoCapitalize="none"
           keyboardType="email-address"
           placeholder="juan@email.com"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={Layout.colors.placeholder}
           style={styles.input}
           value={email}
           onChangeText={setEmail}
@@ -71,7 +72,7 @@ export default function RegisterScreen() {
         <ThemedText type="defaultSemiBold">Password</ThemedText>
         <TextInput
           placeholder="••••••••"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={Layout.colors.placeholder}
           secureTextEntry
           style={styles.input}
           value={password}
@@ -105,10 +106,10 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    padding: Layout.spacing.screen,
     justifyContent: 'center',
     gap: 28,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: Layout.colors.appBackground,
   },
   hero: {
     alignItems: 'center',
@@ -116,37 +117,32 @@ const styles = StyleSheet.create({
   },
   card: {
     padding: 20,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.cardLarge,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.baseCard.borderColor,
+    backgroundColor: Layout.baseCard.backgroundColor,
     gap: 12,
   },
   input: {
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.35)',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#0F172A',
-    backgroundColor: '#F8FAFC',
+    ...Layout.baseInput,
+    color: Layout.colors.textPrimary,
+    backgroundColor: Layout.colors.inputBackground,
   },
   button: {
     marginTop: 6,
-    backgroundColor: '#0F172A',
+    backgroundColor: Layout.colors.primary,
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: Layout.radii.button,
     alignItems: 'center',
   },
   buttonPressed: {
     opacity: 0.8,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: Layout.colors.surface,
   },
   error: {
-    color: '#DC2626',
+    color: Layout.colors.danger,
   },
   footer: {
     alignItems: 'center',
