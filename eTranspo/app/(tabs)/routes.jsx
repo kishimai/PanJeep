@@ -2,16 +2,29 @@ import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Layout } from '@/constants/layout';
 
 export default function RoutesScreen() {
   return (
     <ThemedView style={styles.container}>
-      <ThemedView style={styles.card}>
-        <ThemedText type="subtitle" style={styles.text}>
-          Routes coming soon
-        </ThemedText>
+      <ThemedView style={styles.header}>
+        <ThemedText type="title">Routes</ThemedText>
         <ThemedText style={styles.subtext}>
-          We’re preparing detailed route maps and stop data.
+          Plan trips faster with saved lines and smart suggestions.
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="defaultSemiBold">Suggested for you</ThemedText>
+        <ThemedText style={styles.cardText}>
+          Set your start and destination to unlock route options.
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="defaultSemiBold">Favorites</ThemedText>
+        <ThemedText style={styles.cardText}>
+          Save frequent routes for quick access.
         </ThemedText>
       </ThemedView>
     </ThemedView>
@@ -21,25 +34,25 @@ export default function RoutesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: '#F1F5F9',
+    padding: Layout.spacing.screen,
+    gap: Layout.spacing.section,
+    backgroundColor: Layout.colors.appBackground,
+  },
+  header: {
+    gap: 8,
   },
   card: {
     padding: 24,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
+    borderRadius: Layout.radii.card,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.baseCard.borderColor,
+    backgroundColor: Layout.baseCard.backgroundColor,
     gap: 8,
   },
-  text: {
-    textAlign: 'center',
-  },
   subtext: {
-    textAlign: 'center',
-    color: '#64748B',
+    color: Layout.colors.textMuted,
+  },
+  cardText: {
+    color: Layout.colors.textMuted,
   },
 });

@@ -3,10 +3,21 @@ import * as Haptics from 'expo-haptics';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Layout } from '@/constants/layout';
 
 export default function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
+      <ThemedView style={styles.header}>
+        <ThemedView>
+          <ThemedText type="title">Hi, commuter</ThemedText>
+          <ThemedText style={styles.headerSubtitle}>Let’s plan your next trip.</ThemedText>
+        </ThemedView>
+        <ThemedView style={styles.headerPill}>
+          <ThemedText style={styles.headerPillText}>Live updates</ThemedText>
+        </ThemedView>
+      </ThemedView>
+
       <ThemedView style={styles.hero}>
         <Pressable
           style={({ pressed }) => [styles.searchBar, pressed && styles.cardPressed]}
@@ -33,10 +44,12 @@ export default function HomeScreen() {
           <ThemedView style={styles.snapshotCard}>
             <ThemedText type="defaultSemiBold">Active Routes</ThemedText>
             <ThemedText style={styles.cardValue}>12</ThemedText>
+            <ThemedText style={styles.cardMeta}>+2 since yesterday</ThemedText>
           </ThemedView>
           <ThemedView style={styles.snapshotCard}>
             <ThemedText type="defaultSemiBold">ETA Nearby</ThemedText>
             <ThemedText style={styles.cardValue}>3–6 min</ThemedText>
+            <ThemedText style={styles.cardMeta}>Average across terminals</ThemedText>
           </ThemedView>
         </ThemedView>
       </ThemedView>
@@ -65,30 +78,49 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: Layout.spacing.screen,
     gap: 24,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: Layout.colors.appBackground,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerSubtitle: {
+    color: Layout.colors.textMuted,
+  },
+  headerPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Layout.radii.pill,
+    backgroundColor: Layout.colors.accentSoft,
+  },
+  headerPillText: {
+    color: Layout.colors.accent,
+    fontSize: 12,
   },
   hero: {
     gap: 16,
   },
   searchBar: {
     padding: 16,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.chip,
+    backgroundColor: Layout.colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.3)',
+    borderColor: Layout.colors.borderInput,
     gap: 4,
   },
   searchHint: {
-    color: '#64748B',
+    color: Layout.colors.textMuted,
   },
   mapCard: {
     padding: 18,
-    borderRadius: 22,
+    borderRadius: Layout.radii.cardXL,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
+    borderColor: Layout.colors.border,
+    backgroundColor: Layout.colors.surface,
     gap: 10,
   },
   mapLegend: {
@@ -103,10 +135,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   legendActive: {
-    backgroundColor: '#22C55E',
+    backgroundColor: Layout.colors.success,
   },
   legendInactive: {
-    backgroundColor: '#38BDF8',
+    backgroundColor: Layout.colors.info,
   },
   section: {
     gap: 12,
@@ -118,14 +150,18 @@ const styles = StyleSheet.create({
   snapshotCard: {
     flex: 1,
     padding: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.chip,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.colors.borderSubtle,
+    backgroundColor: Layout.baseCard.backgroundColor,
     gap: 6,
   },
   cardValue: {
     fontSize: 26,
+  },
+  cardMeta: {
+    color: Layout.colors.textMuted,
+    fontSize: 12,
   },
   cardRow: {
     flexDirection: 'row',
@@ -134,10 +170,10 @@ const styles = StyleSheet.create({
   smallCard: {
     flex: 1,
     padding: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.25)',
-    backgroundColor: '#FFFFFF',
+    borderRadius: Layout.radii.chip,
+    borderWidth: Layout.baseCard.borderWidth,
+    borderColor: Layout.baseCard.borderColor,
+    backgroundColor: Layout.baseCard.backgroundColor,
     gap: 6,
   },
   cardPressed: {
