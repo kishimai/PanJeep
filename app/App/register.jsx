@@ -211,49 +211,68 @@ export default function Register() {
                 return;
             }
 
-            // 2️⃣ Call create-account edge function to insert profile
-            const res = await fetch(
-                `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/create-account`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-                    },
-                    body: JSON.stringify({
-                        user_id: user.id,
-                        email: user.email,
-                        role: "passenger",
-                    }),
+            //inserting directly without edge function
+            const { error: profileError } = await supabase
+                .from("users")
+                .insert({
+                    id: user.id,
+                    email: user.email,
+                    role: "passenger",
+                    created_at: new Date().toISOString(),
+                })
+                .select();
+
+            if (profileError) {
+                console.error("Profile insertion error:", profileError);
+                if (profileError.code === '23505') {
+                    Alert.alert(
+                        "Profile Already Exists",
+                        "Your account was created, but profile already exists.",
+                        [
+                            {
+                                text: "Continue to Login",
+                                onPress: () => router.replace("/login"),
+                            },
+                        ]
+                    );
+                } else if (profileError.message.includes("row-level security")) {
+                    Alert.alert(
+                        "Permission Issue",
+                        "Your account was created, but couldn't create profile due to security settings.",
+                        [
+                            {
+                                text: "Contact Support",
+                                onPress: () => router.replace("/login"),
+                            },
+                            {
+                                text: "Try Login",
+                                style: "default",
+                                onPress: () => router.replace("/login"),
+                            },
+                        ]
+                    );
+                } else {
+                    Alert.alert(
+                        "Partial Success",
+                        "Account created but profile setup incomplete. You can still sign in and contact support.",
+                        [
+                            {
+                                text: "Continue to Login",
+                                onPress: () => router.replace("/login"),
+                            },
+                        ]
+                    );
                 }
-            );
-
-            const result = await res.json();
-
-            if (!res.ok || !result.success) {
-                console.error("Profile creation failed:", result.error);
-
-                Alert.alert(
-                    "Partial Success",
-                    "Account created but profile setup incomplete. You can still sign in and contact support for assistance.",
-                    [
-                        {
-                            text: "Continue to Login",
-                            onPress: () => router.replace("/login"),
-                        },
-                    ]
-                );
                 setLoading(false);
                 return;
             }
 
-            // 3️⃣ Optional: Verify email is confirmed before auto-login
             const {
                 data: { user: currentUser },
             } = await supabase.auth.getUser();
 
             if (currentUser && currentUser.email_confirmed_at) {
-                // User email is already confirmed
+                // User email is already confirmed - auto login
                 const { error: loginError } = await supabase.auth.signInWithPassword({
                     email,
                     password,
@@ -284,7 +303,6 @@ export default function Register() {
                     }, 800);
                 }
             } else {
-                // Email confirmation required
                 Animated.spring(checkmarkScale, {
                     toValue: 1,
                     tension: 150,

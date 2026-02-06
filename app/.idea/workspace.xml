@@ -5,20 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="54f70619-1484-4ec8-bcea-9b5e10d4fc19" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/(tabs)/account.operator.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/(tabs)/home.operator.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/(tabs)/routes.operator.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/_layout.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/index.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/login.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/register.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/supabase.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/useProfile.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/useSession.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/login.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/login.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/register.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/register.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/.temp/cli-latest" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/config.toml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/create-account/.npmrc" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/create-account/deno.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/create-account/index.ts" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -94,6 +88,8 @@
       <updated>1770192131142</updated>
       <workItem from="1770192133168" duration="995000" />
       <workItem from="1770212513869" duration="17888000" />
+      <workItem from="1770350988847" duration="5804000" />
+      <workItem from="1770358240458" duration="13000" />
     </task>
     <servers />
   </component>

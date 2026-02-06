@@ -206,8 +206,6 @@ export default function Login() {
                                 <Feather name="log-in" size={50} color="#4A90E2" />
                             </View>
                         </Animated.View>
-                        <Text style={styles.title}>Welcome Back</Text>
-                        <Text style={styles.subtitle}>Sign in to continue your journey</Text>
                     </View>
 
                     {/* Form Section */}
