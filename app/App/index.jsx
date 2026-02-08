@@ -1,14 +1,14 @@
 import { Redirect } from "expo-router";
-import { useSession } from "../lib/useSession";
+import { useAuth } from '../providers/AuthProvider';
 
 export default function Index() {
-    const { session, loading } = useSession();
+    const { session, isLoading} = useAuth();
 
-    if (loading) return null;
+    if (isLoading) return null;
 
     if (session) {
         return <Redirect href="/(tabs)" />;
     }
 
-    return <Redirect href="/login" />;
+    return <Redirect href="/UserEnter" />;
 }

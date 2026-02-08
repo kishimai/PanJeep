@@ -5,14 +5,26 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="54f70619-1484-4ec8-bcea-9b5e10d4fc19" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/App/UserEnter.jsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/App/login.tsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/lib/deviceId.tsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/lib/supabase.ts" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/lib/useProfile.tsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/providers/AuthProvider.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/login.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/login.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/register.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/register.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/.temp/cli-latest" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/config.toml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/functions/create-account/.npmrc" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/functions/create-account/deno.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/functions/create-account/index.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/(tabs)/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/_layout.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/_layout.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/index.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/index.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/login.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.json" beforeDir="false" afterPath="$PROJECT_DIR$/app.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/supabase.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/useProfile.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/useSession.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -58,6 +70,7 @@
     &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;javascript.preferred.runtime.type.id&quot;: &quot;node&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/Guest1/Desktop/Projects/PanJeep/app&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -90,6 +103,8 @@
       <workItem from="1770212513869" duration="17888000" />
       <workItem from="1770350988847" duration="5804000" />
       <workItem from="1770358240458" duration="13000" />
+      <workItem from="1770542122272" duration="6723000" />
+      <workItem from="1770556117359" duration="15555000" />
     </task>
     <servers />
   </component>

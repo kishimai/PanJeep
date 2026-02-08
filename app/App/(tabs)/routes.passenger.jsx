@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
@@ -8,256 +8,366 @@ import {
     TextInput,
     StatusBar,
     Platform,
-} from "react-native";
+    Dimensions,
+    ActivityIndicator,
+} from 'react-native';
+import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { getCurrentPositionAsync, requestForegroundPermissionsAsync } from 'expo-location';
+import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { supabase } from '../../lib/supabase';
+
+const { width, height } = Dimensions.get('window');
 
 export default function PassengerRoutes() {
-    const [activeRoute, setActiveRoute] = useState(0);
-    const [expandedRoute, setExpandedRoute] = useState(null);
-    const [selectedFilter, setSelectedFilter] = useState("all");
+    const [activeRoute, setActiveRoute] = useState(null);
+    const [userLocation, setUserLocation] = useState(null);
+    const [routes, setRoutes] = useState([]);
+    const [selectedFilter, setSelectedFilter] = useState('all');
+    const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedRouteDetails, setSelectedRouteDetails] = useState(null);
 
-    // Mock data
-    const routes = [
-        {
-            id: 1,
-            busNumber: "Jeepney 01",
-            routeName: "Route 12A: Downtown Loop",
-            nextStop: "5th Ave & Oak St",
-            arrivalTime: "8:15",
-            estimatedTime: "15 min",
-            passengers: "12/20 seats",
-            fare: "₱15",
-            rating: "4.5",
-            status: "on_time",
-        },
-        {
-            id: 2,
-            busNumber: "Jeepney 07",
-            routeName: "Route 8B: University Express",
-            nextStop: "Science Building",
-            arrivalTime: "8:22",
-            estimatedTime: "7 min",
-            passengers: "8/20 seats",
-            fare: "₱12",
-            rating: "4.8",
-            status: "delayed",
-        },
-        {
-            id: 3,
-            busNumber: "Jeepney 14",
-            routeName: "Route 5C: Coastal Line",
-            nextStop: "Fisherman's Wharf",
-            arrivalTime: "8:30",
-            estimatedTime: "20 min",
-            passengers: "15/20 seats",
-            fare: "₱20",
-            rating: "4.2",
-            status: "early",
-        },
-    ];
+    const mapRef = useRef(null);
 
-    const filters = [
-        { id: "all", label: "All" },
-        { id: "nearby", label: "Nearby" },
-        { id: "fastest", label: "Fastest" },
-        { id: "cheapest", label: "Cheapest" },
-    ];
+    // Fetch routes from your Supabase database
+    const fetchRoutes = async () => {
+        try {
+            setLoading(true);
 
+            // Query routes from your public.routes table
+            const { data, error } = await supabase
+                .from('routes')
+                .select(`
+          id,
+          route_code,
+          status,
+          geometry,
+          length_meters,
+          created_at,
+          updated_at,
+          region_id,
+          regions:region_id (
+            name,
+            code
+          )
+        `)
+                .is('deleted_at', null) // Only non-deleted routes
+                .neq('status', 'deprecated') // Filter out deprecated routes
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            // Transform database data to match our app format
+            const transformedRoutes = (data || []).map(dbRoute => {
+                // Extract coordinates from geometry JSONB column
+                const coordinates = dbRoute.geometry?.coordinates || [];
+
+                return {
+                    id: dbRoute.id,
+                    name: dbRoute.geometry?.properties?.name || dbRoute.route_code,
+                    code: dbRoute.route_code,
+                    color: '#0066CC', // Default color
+                    rawPoints: coordinates, // This is already in [lng, lat] format
+                    status: dbRoute.status,
+                    estimatedTime: dbRoute.length_meters
+                        ? `${Math.round(dbRoute.length_meters / 1000 / 30 * 60)} min`
+                        : 'N/A',
+                    fare: '₱15', // You might want to add this to your database
+                    rating: 4.5, // You might want to add this to your database
+                    busNumber: dbRoute.route_code,
+                    region: dbRoute.regions?.name || 'No region',
+                    passengers: '12/20 seats', // You might want to add this to your database
+                    nextStop: 'Next stop', // You might want to add stop data
+                };
+            });
+
+            setRoutes(transformedRoutes);
+        } catch (error) {
+            console.error('Error fetching routes:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Get user location
+    useEffect(() => {
+        const init = async () => {
+            try {
+                const { status } = await requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    console.log('Location permission denied');
+                    return;
+                }
+
+                const location = await getCurrentPositionAsync({});
+                setUserLocation({
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                    latitudeDelta: 0.0922,
+                    longitudeDelta: 0.0421,
+                });
+            } catch (error) {
+                console.log('Error getting location:', error);
+            }
+        };
+
+        init();
+        fetchRoutes();
+    }, []);
+
+    // Center map on user location
+    const centerOnUserLocation = () => {
+        if (userLocation && mapRef.current) {
+            mapRef.current.animateToRegion(userLocation, 1000);
+        }
+    };
+
+    // Center on selected route
+    const centerOnRoute = (route) => {
+        if (route.rawPoints && route.rawPoints.length > 0 && mapRef.current) {
+            const coordinates = route.rawPoints.map(coord => ({
+                latitude: coord[1], // Note: Your DB stores [lng, lat], MapView needs [lat, lng]
+                longitude: coord[0],
+            }));
+
+            // Calculate bounds
+            const minLat = Math.min(...coordinates.map(c => c.latitude));
+            const maxLat = Math.max(...coordinates.map(c => c.latitude));
+            const minLng = Math.min(...coordinates.map(c => c.longitude));
+            const maxLng = Math.max(...coordinates.map(c => c.longitude));
+
+            mapRef.current.fitToCoordinates(coordinates, {
+                edgePadding: { top: 50, right: 50, bottom: 200, left: 50 },
+                animated: true,
+            });
+        }
+    };
+
+    // Handle route selection
+    const handleRouteSelect = (route) => {
+        setActiveRoute(route.id);
+        setSelectedRouteDetails(route);
+        centerOnRoute(route);
+    };
+
+    // Get status color
     const getStatusColor = (status) => {
         switch (status) {
-            case "on_time":
-                return "#22C55E";
-            case "delayed":
-                return "#EF4444";
-            case "early":
-                return "#3B82F6";
+            case 'active':
+                return '#22C55E';
+            case 'temporarily_suspended':
+                return '#EF4444';
+            case 'draft':
+                return '#3B82F6';
             default:
-                return "#6B7280";
+                return '#6B7280';
         }
     };
 
+    // Get status text
     const getStatusText = (status) => {
         switch (status) {
-            case "on_time":
-                return "On Time";
-            case "delayed":
-                return "Delayed";
-            case "early":
-                return "Early";
+            case 'active':
+                return 'Active';
+            case 'temporarily_suspended':
+                return 'Suspended';
+            case 'draft':
+                return 'Draft';
             default:
-                return "";
+                return 'Unknown';
         }
     };
+
+    // Render route polylines on the map
+    const renderRouteLines = () => {
+        return routes.map(route => {
+            if (!route.rawPoints || route.rawPoints.length < 2) return null;
+
+            const coordinates = route.rawPoints.map(coord => ({
+                latitude: coord[1], // Convert [lng, lat] to {lat, lng}
+                longitude: coord[0],
+            }));
+
+            return (
+                <Polyline
+                    key={`line-${route.id}`}
+                    coordinates={coordinates}
+                    strokeColor={activeRoute === route.id ? '#FF6B6B' : route.color}
+                    strokeWidth={activeRoute === route.id ? 5 : 3}
+                    lineDashPattern={route.status === 'draft' ? [5, 5] : undefined}
+                />
+            );
+        });
+    };
+
+    // Render route markers
+    const renderRouteMarkers = () => {
+        return routes.map(route => {
+            if (!route.rawPoints || route.rawPoints.length === 0) return null;
+
+            const midIndex = Math.floor(route.rawPoints.length / 2);
+            const midPoint = route.rawPoints[midIndex];
+
+            return (
+                <Marker
+                    key={`marker-${route.id}`}
+                    coordinate={{
+                        latitude: midPoint[1],
+                        longitude: midPoint[0],
+                    }}
+                    onPress={() => handleRouteSelect(route)}
+                >
+                    <View style={[
+                        styles.markerContainer,
+                        { backgroundColor: activeRoute === route.id ? '#FF6B6B' : route.color }
+                    ]}>
+                        <Text style={styles.markerText}>{route.code}</Text>
+                    </View>
+                </Marker>
+            );
+        });
+    };
+
+    if (loading) {
+        return (
+            <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#0066CC" />
+                <Text style={styles.loadingText}>Loading routes...</Text>
+            </View>
+        );
+    }
 
     return (
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-            {/* Header */}
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Available Routes</Text>
-                <Text style={styles.headerSubtitle}>Find your jeepney</Text>
-            </View>
+            {/* Map View */}
+            <MapView
+                ref={mapRef}
+                style={styles.map}
+                provider={PROVIDER_GOOGLE}
+                showsUserLocation={true}
+                showsMyLocationButton={false}
+                initialRegion={userLocation || {
+                    latitude: 14.5995, // Manila
+                    longitude: 120.9842,
+                    latitudeDelta: 0.0922,
+                    longitudeDelta: 0.0421,
+                }}
+            >
+                {/* Render route lines and markers */}
+                {renderRouteLines()}
+                {renderRouteMarkers()}
+            </MapView>
 
-            {/* Search Bar */}
-            <View style={styles.searchContainer}>
-                <View style={styles.searchBar}>
+            {/* Top Controls */}
+            <View style={styles.topControls}>
+                {/* Search Bar */}
+                <View style={styles.searchContainer}>
+                    <MaterialIcons name="search" size={20} color="#64748B" />
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="Search destination or route..."
+                        placeholder="Search routes or destinations..."
                         placeholderTextColor="#94A3B8"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
                     />
+                    {searchQuery ? (
+                        <TouchableOpacity onPress={() => setSearchQuery('')}>
+                            <MaterialIcons name="close" size={20} color="#64748B" />
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
+
+                {/* Location Button */}
+                <TouchableOpacity style={styles.locationButton} onPress={centerOnUserLocation}>
+                    <MaterialIcons name="my-location" size={22} color="#0066CC" />
+                </TouchableOpacity>
             </View>
 
-            {/* Filters */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.filtersContainer}
-            >
-                {filters.map((filter) => (
-                    <TouchableOpacity
-                        key={filter.id}
-                        style={[
-                            styles.filterButton,
-                            selectedFilter === filter.id && styles.filterButtonActive,
-                        ]}
-                        onPress={() => setSelectedFilter(filter.id)}
-                    >
-                        <Text
-                            style={[
-                                styles.filterText,
-                                selectedFilter === filter.id && styles.filterTextActive,
-                            ]}
-                        >
-                            {filter.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+            {/* Bottom Routes List */}
+            <View style={styles.bottomSheet}>
+                <View style={styles.dragHandle}>
+                    <View style={styles.dragIndicator} />
+                </View>
 
-            {/* Route Count */}
-            <View style={styles.countContainer}>
-                <Text style={styles.countText}>
-                    {routes.length} routes available near you
-                </Text>
-            </View>
+                <View style={styles.sheetHeader}>
+                    <Text style={styles.sheetTitle}>Available Routes</Text>
+                    <Text style={styles.sheetSubtitle}>
+                        {routes.length} routes from database
+                    </Text>
+                </View>
 
-            {/* Routes List */}
-            <ScrollView
-                style={styles.routesList}
-                showsVerticalScrollIndicator={false}
-            >
-                {routes.map((route, index) => {
-                    const isExpanded = expandedRoute === route.id;
-                    const isActive = activeRoute === index;
-
-                    return (
+                <ScrollView
+                    style={styles.routesList}
+                    showsVerticalScrollIndicator={false}
+                >
+                    {routes.map((route) => (
                         <TouchableOpacity
                             key={route.id}
                             style={[
                                 styles.routeCard,
-                                isActive && styles.routeCardActive,
-                                isExpanded && styles.routeCardExpanded,
+                                activeRoute === route.id && styles.routeCardActive,
                             ]}
-                            onPress={() => {
-                                setActiveRoute(index);
-                                setExpandedRoute(isExpanded ? null : route.id);
-                            }}
-                            activeOpacity={0.9}
+                            onPress={() => handleRouteSelect(route)}
+                            activeOpacity={0.7}
                         >
-                            {/* Route Header */}
                             <View style={styles.routeHeader}>
-                                <View style={styles.routeNumberContainer}>
-                                    <Text style={styles.routeNumber}>{route.busNumber}</Text>
+                                <View style={[
+                                    styles.routeBadge,
+                                    { backgroundColor: route.color }
+                                ]}>
+                                    <Text style={styles.routeBadgeText}>{route.code}</Text>
                                 </View>
-
                                 <View style={styles.routeInfo}>
                                     <Text style={styles.routeName} numberOfLines={1}>
-                                        {route.routeName}
+                                        {route.name}
                                     </Text>
-                                    <View style={styles.ratingContainer}>
-                                        <Text style={styles.ratingText}>⭐ {route.rating}</Text>
-                                    </View>
-                                </View>
-                            </View>
-
-                            {/* Status and Arrival */}
-                            <View style={styles.statusRow}>
-                                <View style={styles.statusContainer}>
-                                    <View
-                                        style={[
-                                            styles.statusDot,
-                                            { backgroundColor: getStatusColor(route.status) },
-                                        ]}
-                                    />
-                                    <Text style={styles.statusText}>
-                                        {getStatusText(route.status)}
-                                    </Text>
-                                </View>
-                                <View style={styles.arrivalContainer}>
-                                    <Text style={styles.arrivalLabel}>Arrives at</Text>
-                                    <Text style={styles.arrivalTime}>{route.arrivalTime}</Text>
-                                </View>
-                            </View>
-
-                            {/* Quick Info */}
-                            <View style={styles.quickInfo}>
-                                <View style={styles.infoItem}>
-                                    <Text style={styles.infoLabel}>Next Stop</Text>
-                                    <Text style={styles.infoValue}>{route.nextStop}</Text>
-                                </View>
-                                <View style={styles.infoItem}>
-                                    <Text style={styles.infoLabel}>Travel Time</Text>
-                                    <Text style={styles.infoValue}>{route.estimatedTime}</Text>
-                                </View>
-                                <View style={styles.infoItem}>
-                                    <Text style={styles.infoLabel}>Fare</Text>
-                                    <Text style={styles.fareValue}>{route.fare}</Text>
-                                </View>
-                            </View>
-
-                            {/* Expanded Details */}
-                            {isExpanded && (
-                                <View style={styles.expandedDetails}>
-                                    <View style={styles.divider} />
-
-                                    <View style={styles.detailRow}>
-                                        <View style={styles.detailItem}>
-                                            <Text style={styles.detailLabel}>Passengers</Text>
-                                            <Text style={styles.detailValue}>{route.passengers}</Text>
-                                        </View>
-                                        <View style={styles.detailItem}>
-                                            <Text style={styles.detailLabel}>Status</Text>
-                                            <Text style={[styles.detailValue, { color: getStatusColor(route.status) }]}>
+                                    <View style={styles.routeMeta}>
+                                        <Text style={styles.routeRegion}>{route.region}</Text>
+                                        <View style={styles.statusBadge}>
+                                            <View style={[
+                                                styles.statusDot,
+                                                { backgroundColor: getStatusColor(route.status) }
+                                            ]} />
+                                            <Text style={styles.statusText}>
                                                 {getStatusText(route.status)}
                                             </Text>
                                         </View>
                                     </View>
-
-                                    <View style={styles.actions}>
-                                        <TouchableOpacity style={styles.secondaryAction}>
-                                            <Text style={styles.secondaryActionText}>Notify Me</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.primaryAction}>
-                                            <Text style={styles.primaryActionText}>Track Route</Text>
-                                        </TouchableOpacity>
-                                    </View>
                                 </View>
-                            )}
-                        </TouchableOpacity>
-                    );
-                })}
-            </ScrollView>
+                                <View style={styles.routeFare}>
+                                    <Text style={styles.fareText}>{route.fare}</Text>
+                                </View>
+                            </View>
 
-            {/* Bottom Actions */}
-            <View style={styles.bottomContainer}>
-                <View style={styles.safetyInfo}>
-                    <Text style={styles.safetyText}>✅ All vehicles are safety-checked</Text>
-                </View>
-                <TouchableOpacity style={styles.trackAllButton}>
-                    <Text style={styles.trackAllText}>Track All Routes</Text>
-                </TouchableOpacity>
+                            <View style={styles.routeDetails}>
+                                <View style={styles.detailItem}>
+                                    <FontAwesome5 name="route" size={12} color="#64748B" />
+                                    <Text style={styles.detailText}>
+                                        {route.rawPoints?.length || 0} points
+                                    </Text>
+                                </View>
+                                <View style={styles.detailItem}>
+                                    <MaterialIcons name="schedule" size={12} color="#64748B" />
+                                    <Text style={styles.detailText}>
+                                        {route.estimatedTime}
+                                    </Text>
+                                </View>
+                                <View style={styles.detailItem}>
+                                    <MaterialIcons name="people" size={12} color="#64748B" />
+                                    <Text style={styles.detailText}>{route.passengers}</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.routeStats}>
+                                <Text style={styles.statsText}>
+                                    Length: {route.length_meters ? `${(route.length_meters / 1000).toFixed(1)} km` : 'N/A'}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
             </View>
         </View>
     );
@@ -266,270 +376,228 @@ export default function PassengerRoutes() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: "#F8FAFC",
+        backgroundColor: '#F8FAFC',
     },
-    header: {
-        paddingTop: Platform.OS === "ios" ? 60 : 40,
-        paddingHorizontal: 20,
-        paddingBottom: 16,
-        backgroundColor: "#FFFFFF",
+    map: {
+        flex: 1,
     },
-    headerTitle: {
-        fontSize: 28,
-        fontWeight: "700",
-        color: "#0F172A",
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#F8FAFC',
     },
-    headerSubtitle: {
+    loadingText: {
+        marginTop: 12,
         fontSize: 16,
-        color: "#64748B",
-        marginTop: 4,
+        color: '#64748B',
+    },
+    topControls: {
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 60 : 40,
+        left: 20,
+        right: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
     },
     searchContainer: {
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        backgroundColor: "#FFFFFF",
-        borderBottomWidth: 1,
-        borderBottomColor: "#E2E8F0",
-    },
-    searchBar: {
-        backgroundColor: "#F1F5F9",
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
         borderRadius: 12,
         paddingHorizontal: 16,
         paddingVertical: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
     searchInput: {
-        fontSize: 16,
-        color: "#0F172A",
-    },
-    filtersContainer: {
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        backgroundColor: "#FFFFFF",
-    },
-    filterButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        backgroundColor: "#F1F5F9",
-        borderRadius: 20,
-        marginRight: 8,
-    },
-    filterButtonActive: {
-        backgroundColor: "#3B82F6",
-    },
-    filterText: {
+        flex: 1,
+        marginLeft: 12,
         fontSize: 14,
-        color: "#64748B",
-        fontWeight: "500",
+        color: '#0F172A',
     },
-    filterTextActive: {
-        color: "#FFFFFF",
+    locationButton: {
+        width: 50,
+        height: 50,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
-    countContainer: {
-        paddingHorizontal: 20,
+    bottomSheet: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: height * 0.4,
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 10,
+        paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    },
+    dragHandle: {
+        alignItems: 'center',
         paddingVertical: 12,
     },
-    countText: {
+    dragIndicator: {
+        width: 40,
+        height: 4,
+        backgroundColor: '#E2E8F0',
+        borderRadius: 2,
+    },
+    sheetHeader: {
+        paddingHorizontal: 20,
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
+    },
+    sheetTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#0F172A',
+    },
+    sheetSubtitle: {
         fontSize: 14,
-        color: "#64748B",
+        color: '#64748B',
+        marginTop: 4,
     },
     routesList: {
         flex: 1,
         paddingHorizontal: 20,
+        paddingTop: 16,
     },
     routeCard: {
-        backgroundColor: "#FFFFFF",
+        backgroundColor: '#FFFFFF',
         borderRadius: 12,
         padding: 16,
         marginBottom: 12,
         borderWidth: 1,
-        borderColor: "#E2E8F0",
-        shadowColor: "#000",
+        borderColor: '#E2E8F0',
+        shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.05,
         shadowRadius: 2,
         elevation: 1,
     },
     routeCardActive: {
-        borderColor: "#3B82F6",
+        borderColor: '#0066CC',
         borderWidth: 2,
-    },
-    routeCardExpanded: {
-        marginBottom: 16,
+        backgroundColor: '#F0F7FF',
     },
     routeHeader: {
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         marginBottom: 12,
     },
-    routeNumberContainer: {
-        backgroundColor: "#3B82F6",
+    routeBadge: {
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderRadius: 8,
         marginRight: 12,
     },
-    routeNumber: {
-        color: "#FFFFFF",
-        fontSize: 14,
-        fontWeight: "600",
+    routeBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '600',
     },
     routeInfo: {
         flex: 1,
     },
     routeName: {
         fontSize: 16,
-        fontWeight: "600",
-        color: "#0F172A",
+        fontWeight: '600',
+        color: '#0F172A',
         marginBottom: 4,
     },
-    ratingContainer: {
-        alignSelf: "flex-start",
-        backgroundColor: "#FEF3C7",
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
+    routeMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
     },
-    ratingText: {
+    routeRegion: {
         fontSize: 12,
-        color: "#92400E",
-        fontWeight: "600",
+        color: '#64748B',
     },
-    statusRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: 16,
-    },
-    statusContainer: {
-        flexDirection: "row",
-        alignItems: "center",
+    statusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
     },
     statusDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginRight: 6,
+        width: 6,
+        height: 6,
+        borderRadius: 3,
     },
     statusText: {
-        fontSize: 14,
-        color: "#64748B",
-        fontWeight: "500",
+        fontSize: 11,
+        color: '#64748B',
+        fontWeight: '500',
     },
-    arrivalContainer: {
-        alignItems: "flex-end",
+    routeFare: {
+        marginLeft: 'auto',
     },
-    arrivalLabel: {
-        fontSize: 12,
-        color: "#64748B",
-        marginBottom: 2,
-    },
-    arrivalTime: {
+    fareText: {
         fontSize: 18,
-        fontWeight: "700",
-        color: "#0F172A",
+        fontWeight: '700',
+        color: '#22C55E',
     },
-    quickInfo: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        marginBottom: 4,
-    },
-    infoItem: {
-        flex: 1,
-    },
-    infoLabel: {
-        fontSize: 12,
-        color: "#64748B",
-        marginBottom: 4,
-    },
-    infoValue: {
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#0F172A",
-    },
-    fareValue: {
-        fontSize: 18,
-        fontWeight: "700",
-        color: "#22C55E",
-    },
-    expandedDetails: {
-        marginTop: 4,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: "#E2E8F0",
-        marginVertical: 12,
-    },
-    detailRow: {
-        flexDirection: "row",
-        marginBottom: 16,
+    routeDetails: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 12,
     },
     detailItem: {
         flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
     },
-    detailLabel: {
+    detailText: {
         fontSize: 12,
-        color: "#64748B",
-        marginBottom: 4,
+        color: '#64748B',
     },
-    detailValue: {
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#0F172A",
-    },
-    actions: {
-        flexDirection: "row",
-        gap: 12,
-    },
-    secondaryAction: {
-        flex: 1,
-        paddingVertical: 12,
-        borderWidth: 1,
-        borderColor: "#E2E8F0",
-        borderRadius: 8,
-        alignItems: "center",
-    },
-    secondaryActionText: {
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#64748B",
-    },
-    primaryAction: {
-        flex: 2,
-        paddingVertical: 12,
-        backgroundColor: "#3B82F6",
-        borderRadius: 8,
-        alignItems: "center",
-    },
-    primaryActionText: {
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#FFFFFF",
-    },
-    bottomContainer: {
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        backgroundColor: "#FFFFFF",
+    routeStats: {
+        paddingTop: 8,
         borderTopWidth: 1,
-        borderTopColor: "#E2E8F0",
+        borderTopColor: '#F1F5F9',
     },
-    safetyInfo: {
-        alignItems: "center",
-        marginBottom: 12,
+    statsText: {
+        fontSize: 11,
+        color: '#94A3B8',
+        fontStyle: 'italic',
     },
-    safetyText: {
-        fontSize: 13,
-        color: "#0F9732",
-        fontWeight: "500",
+    markerContainer: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
     },
-    trackAllButton: {
-        paddingVertical: 16,
-        backgroundColor: "#0F172A",
-        borderRadius: 12,
-        alignItems: "center",
-    },
-    trackAllText: {
-        fontSize: 16,
-        fontWeight: "600",
-        color: "#FFFFFF",
+    markerText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '600',
     },
 });
