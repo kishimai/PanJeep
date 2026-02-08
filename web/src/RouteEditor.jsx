@@ -1,477 +1,1185 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import mapboxgl from "mapbox-gl";
-import { createEmptyRoute } from "./routeModel.jsx";
-import { estimateLength, clonePoints } from "./routeUtils.jsx";
+import "mapbox-gl/dist/mapbox-gl.css";
+import { estimateLength, clonePoints, simplifyRoute, validateCoordinate } from "./routeUtils.jsx";
+import { supabase } from "./supabase";
 
-export function RouteEditor({
-                                map,
-                                routes,
-                                setRoutes,
-                                activeRouteId,
-                                setActiveRouteId,
-                                exitEditor
-                            }) {
-    const [editMode, setEditMode] = useState(false);
-    const [routeName, setRouteName] = useState("");
-    const [routeCode, setRouteCode] = useState("");
-    const [routeColor, setRouteColor] = useState("#1d4ed8");
-    const [activePointIndex, setActivePointIndex] = useState(null);
+// Custom Hook: Point Editing with History
+const usePointEditing = (initialPoints = []) => {
+    const [points, setPoints] = useState(initialPoints);
+    const [history, setHistory] = useState([initialPoints]);
+    const [historyIndex, setHistoryIndex] = useState(0);
 
-    const activeRoute = useMemo(
-        () => routes.find(r => r.id === activeRouteId),
-        [routes, activeRouteId]
-    );
+    const saveToHistory = useCallback((newPoints) => {
+        setHistory(prev => {
+            const newHistory = prev.slice(0, historyIndex + 1);
+            newHistory.push([...newPoints]);
+            return newHistory;
+        });
+        setHistoryIndex(prev => prev + 1);
+    }, [historyIndex]);
 
+    const updatePoint = useCallback((index, lng, lat) => {
+        if (!validateCoordinate(lng, 'lng') || !validateCoordinate(lat, 'lat')) {
+            return;
+        }
+
+        const newPoints = [...points];
+        newPoints[index] = [parseFloat(lng), parseFloat(lat)];
+        setPoints(newPoints);
+        saveToHistory(newPoints);
+    }, [points, saveToHistory]);
+
+    const addPoint = useCallback((lng, lat, index = -1) => {
+        if (!validateCoordinate(lng, 'lng') || !validateCoordinate(lat, 'lat')) {
+            return;
+        }
+
+        const newPoint = [parseFloat(lng), parseFloat(lat)];
+        let newPoints;
+
+        if (index === -1) {
+            newPoints = [...points, newPoint];
+        } else {
+            newPoints = [...points];
+            newPoints.splice(index + 1, 0, newPoint);
+        }
+
+        setPoints(newPoints);
+        saveToHistory(newPoints);
+    }, [points, saveToHistory]);
+
+    const deletePoint = useCallback((index) => {
+        if (points.length <= 1) return;
+
+        const newPoints = points.filter((_, i) => i !== index);
+        setPoints(newPoints);
+        saveToHistory(newPoints);
+    }, [points, saveToHistory]);
+
+    const clearPoints = useCallback(() => {
+        setPoints([]);
+        saveToHistory([]);
+    }, [saveToHistory]);
+
+    const undo = useCallback(() => {
+        if (historyIndex > 0) {
+            const newIndex = historyIndex - 1;
+            setHistoryIndex(newIndex);
+            setPoints([...history[newIndex]]);
+        }
+    }, [history, historyIndex]);
+
+    const redo = useCallback(() => {
+        if (historyIndex < history.length - 1) {
+            const newIndex = historyIndex + 1;
+            setHistoryIndex(newIndex);
+            setPoints([...history[newIndex]]);
+        }
+    }, [history, historyIndex]);
+
+    const resetPoints = useCallback((newPoints) => {
+        setPoints([...newPoints]);
+        setHistory([newPoints]);
+        setHistoryIndex(0);
+    }, []);
+
+    return {
+        points,
+        setPoints,
+        updatePoint,
+        addPoint,
+        deletePoint,
+        clearPoints,
+        undo,
+        redo,
+        resetPoints,
+        canUndo: historyIndex > 0,
+        canRedo: historyIndex < history.length - 1
+    };
+};
+
+// Custom Hook: Route Visualization
+const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
     const markersRef = useRef([]);
     const polylineLayerId = useRef(null);
 
-    /* ---------------- Core Functions ---------------- */
-
-    const pushHistory = useCallback((route) => ({
-        ...route,
-        history: [...route.history, clonePoints(route.rawPoints)],
-        future: []
-    }), []);
-
-    const updateRoute = useCallback((id, updater) => {
-        setRoutes(prev =>
-            prev.map(r => (r.id === id ? updater(r) : r))
-        );
-    }, [setRoutes]);
-
-    const clearEditorVisuals = useCallback(() => {
-        markersRef.current.forEach(m => m?.remove?.());
+    const clearVisuals = useCallback(() => {
+        markersRef.current.forEach(marker => marker?.remove?.());
         markersRef.current = [];
 
-        if (map && polylineLayerId.current && map.getLayer(polylineLayerId.current)) {
-            const sourceId = `editor-source-${activeRouteId}`;
-            map.removeLayer(polylineLayerId.current);
-            if (map.getSource(sourceId)) map.removeSource(sourceId);
+        if (map && polylineLayerId.current) {
+            try {
+                if (map.getLayer(polylineLayerId.current)) {
+                    map.removeLayer(polylineLayerId.current);
+                }
+                const sourceId = `editor-source-${activeRouteId}`;
+                if (map.getSource(sourceId)) {
+                    map.removeSource(sourceId);
+                }
+            } catch (error) {
+                console.warn('Error clearing map layers:', error);
+            }
             polylineLayerId.current = null;
         }
     }, [map, activeRouteId]);
 
-    /* ---------------- Route CRUD ---------------- */
-
-    const createRoute = useCallback(() => {
-        if (!routeName.trim()) {
-            alert("Please enter a route name");
+    const updateVisuals = useCallback(() => {
+        if (!map || !activeRouteId || points.length === 0) {
+            clearVisuals();
             return;
         }
 
-        const route = createEmptyRoute({
-            name: routeName,
-            code: routeCode,
-            color: routeColor
-        });
+        // Clear existing markers
+        markersRef.current.forEach(marker => marker?.remove?.());
+        markersRef.current = [];
 
-        setRoutes(prev => [route, ...prev]);
-        setActiveRouteId(route.id);
+        // Create new markers with accurate positioning
+        points.forEach(([lng, lat], i) => {
+            const el = document.createElement("div");
+            el.style.cssText = `
+        width: 18px;
+        height: 18px;
+        background: #0066CC;
+        border: 2px solid #FFFFFF;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        cursor: move;
+      `;
 
-        // Reset form
-        setRouteName("");
-        setRouteCode("");
-        setRouteColor("#1d4ed8");
-    }, [routeName, routeCode, routeColor, setRoutes, setActiveRouteId]);
+            // Add point number
+            const number = document.createElement("div");
+            number.textContent = i + 1;
+            number.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 10px;
+        font-weight: bold;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      `;
+            el.appendChild(number);
 
-    const deleteRoute = useCallback((id) => {
-        if (!window.confirm("Are you sure you want to delete this route? This action cannot be undone.")) return;
+            const marker = new mapboxgl.Marker({
+                element: el,
+                draggable: true,
+                offset: [0, 0]
+            })
+                .setLngLat([lng, lat])
+                .addTo(map);
 
-        clearEditorVisuals();
-        setRoutes(prev => prev.filter(r => r.id !== id));
-        if (activeRouteId === id) {
-            setActiveRouteId(null);
-            setActivePointIndex(null);
-        }
-    }, [clearEditorVisuals, setRoutes, activeRouteId, setActiveRouteId]);
-
-    /* ---------------- Point Editing ---------------- */
-
-    useEffect(() => {
-        if (!map || !editMode || !activeRouteId) return;
-
-        const onClick = (e) => {
-            updateRoute(activeRouteId, route => {
-                const updated = pushHistory(route);
-                return {
-                    ...updated,
-                    rawPoints: [...route.rawPoints, [e.lngLat.lng, e.lngLat.lat]],
-                    snappedPoints: null
-                };
+            marker.on("dragstart", () => {
+                el.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.3)";
             });
-        };
 
-        map.on("click", onClick);
-        return () => map.off("click", onClick);
-    }, [map, editMode, activeRouteId, updateRoute, pushHistory]);
+            marker.on("dragend", () => {
+                const { lng: newLng, lat: newLat } = marker.getLngLat();
+                updatePoint(i, newLng, newLat);
+                el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
+            });
 
-    const updatePoint = useCallback((index, lng, lat) => {
-        if (!activeRouteId) return;
-
-        updateRoute(activeRouteId, route => {
-            const updated = pushHistory(route);
-            const pts = clonePoints(route.rawPoints);
-            pts[index] = [parseFloat(lng) || 0, parseFloat(lat) || 0];
-            return { ...updated, rawPoints: pts, snappedPoints: null };
-        });
-    }, [activeRouteId, updateRoute, pushHistory]);
-
-    const deletePoint = useCallback((index) => {
-        if (!activeRouteId) return;
-
-        updateRoute(activeRouteId, route => {
-            const updated = pushHistory(route);
-            const newPoints = route.rawPoints.filter((_, i) => i !== index);
-            return {
-                ...updated,
-                rawPoints: newPoints,
-                snappedPoints: null
-            };
-        });
-        setActivePointIndex(null);
-    }, [activeRouteId, updateRoute, pushHistory]);
-
-    /* ---------------- Undo / Redo ---------------- */
-
-    const undo = useCallback(() => {
-        if (!activeRouteId) return;
-
-        updateRoute(activeRouteId, route => {
-            if (!route.history.length) return route;
-            const previous = route.history.at(-1);
-            return {
-                ...route,
-                rawPoints: clonePoints(previous),
-                history: route.history.slice(0, -1),
-                future: [clonePoints(route.rawPoints), ...route.future],
-                snappedPoints: null
-            };
-        });
-        setActivePointIndex(null);
-    }, [activeRouteId, updateRoute]);
-
-    const redo = useCallback(() => {
-        if (!activeRouteId) return;
-
-        updateRoute(activeRouteId, route => {
-            if (!route.future.length) return route;
-            const next = route.future[0];
-            return {
-                ...route,
-                rawPoints: clonePoints(next),
-                history: [...route.history, clonePoints(route.rawPoints)],
-                future: route.future.slice(1),
-                snappedPoints: null
-            };
-        });
-        setActivePointIndex(null);
-    }, [activeRouteId, updateRoute]);
-
-    /* ---------------- Map Markers & Polyline ---------------- */
-
-    useEffect(() => {
-        if (!map) return;
-        return () => clearEditorVisuals();
-    }, [map, clearEditorVisuals]);
-
-    useEffect(() => {
-        if (!map) return;
-        if (!activeRoute || activeRoute.rawPoints.length === 0) {
-            clearEditorVisuals();
-            return;
-        }
-
-        const pointsToShow = activeRoute.snappedPoints || activeRoute.rawPoints;
-
-        // Update markers
-        markersRef.current.forEach((marker, i) => {
-            if (i >= pointsToShow.length) marker?.remove?.();
+            markersRef.current[i] = marker;
         });
 
-        pointsToShow.forEach(([lng, lat], i) => {
-            let marker = markersRef.current[i];
-            const isActive = i === activePointIndex;
-
-            if (!marker) {
-                const el = document.createElement("div");
-                el.style.cssText = `
-                    width: ${isActive ? '20px' : '16px'};
-                    height: ${isActive ? '20px' : '16px'};
-                    background: ${activeRoute.color || '#1d4ed8'};
-                    border: ${isActive ? '3px solid #f59e0b' : '2px solid #ffffff'};
-                    border-radius: 50%;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                    cursor: move;
-                `;
-
-                marker = new mapboxgl.Marker({ element: el, draggable: true })
-                    .setLngLat([lng, lat])
-                    .addTo(map);
-
-                marker.on("dragend", () => {
-                    const { lng, lat } = marker.getLngLat();
-                    updatePoint(i, lng, lat);
-                });
-
-                markersRef.current[i] = marker;
-            } else {
-                marker.setLngLat([lng, lat]);
-                const el = marker.getElement();
-                el.style.width = isActive ? '20px' : '16px';
-                el.style.height = isActive ? '20px' : '16px';
-                el.style.border = isActive ? '3px solid #f59e0b' : '2px solid #ffffff';
-            }
-        });
-
-        markersRef.current = markersRef.current.slice(0, pointsToShow.length);
-
-        // Update polyline
+        // Update polyline with smooth interpolation
         const sourceId = `editor-source-${activeRouteId}`;
         const layerId = `editor-line-${activeRouteId}`;
         polylineLayerId.current = layerId;
 
         const lineData = {
             type: "Feature",
-            geometry: { type: "LineString", coordinates: pointsToShow }
+            geometry: {
+                type: "LineString",
+                coordinates: points
+            }
         };
 
-        if (map.getSource(sourceId)) {
-            map.getSource(sourceId).setData(lineData);
-        } else {
-            map.addSource(sourceId, { type: "geojson", data: lineData });
-            if (!map.getLayer(layerId)) {
+        try {
+            if (!map.getSource(sourceId)) {
+                map.addSource(sourceId, {
+                    type: "geojson",
+                    data: lineData,
+                    lineMetrics: true
+                });
+
                 map.addLayer({
                     id: layerId,
                     type: "line",
                     source: sourceId,
-                    layout: { "line-join": "round", "line-cap": "round" },
+                    layout: {
+                        "line-join": "round",
+                        "line-cap": "round"
+                    },
                     paint: {
-                        "line-color": activeRoute.color || '#1d4ed8',
+                        "line-color": '#0066CC',
                         "line-width": 4,
-                        "line-dasharray": [2, 2],
-                        "line-opacity": 0.8
+                        "line-opacity": 0.8,
+                        "line-gradient": [
+                            'interpolate',
+                            ['linear'],
+                            ['line-progress'],
+                            0, '#0066CC',
+                            0.5, '#4da6ff',
+                            1, '#0066CC'
+                        ]
                     }
                 });
+            } else {
+                map.getSource(sourceId).setData(lineData);
+            }
+        } catch (error) {
+            console.warn('Error updating polyline:', error);
+        }
+
+        return clearVisuals;
+    }, [map, points, activeRouteId, updatePoint, clearVisuals]);
+
+    return { clearVisuals, updateVisuals };
+};
+
+// UI Components for RouteEditor
+const HeaderSection = ({ activeRoute, exitEditor, undo, redo, canUndo, canRedo }) => (
+    <div style={styles.header}>
+        <div style={styles.headerLeft}>
+            <button onClick={exitEditor} style={styles.backButton}>
+                ← Back
+            </button>
+            <div>
+                <div style={styles.title}>Route Editor</div>
+                <div style={styles.subtitle}>
+                    {activeRoute ? (
+                        <>
+                            <span>Editing: </span>
+                            <span style={{ fontWeight: 500 }}>{activeRoute.name}</span>
+                            <span style={{ marginLeft: 8, fontSize: '12px', color: '#6B7280' }}>
+                {activeRoute.code}
+              </span>
+                        </>
+                    ) : "Create new route"}
+                </div>
+            </div>
+        </div>
+
+        {activeRoute && (
+            <div style={styles.undoRedo}>
+                <button
+                    onClick={undo}
+                    disabled={!canUndo}
+                    style={styles.undoButton}
+                    title="Undo (Ctrl+Z)"
+                >
+                    ↶
+                </button>
+                <button
+                    onClick={redo}
+                    disabled={!canRedo}
+                    style={styles.redoButton}
+                    title="Redo (Ctrl+Y)"
+                >
+                    ↷
+                </button>
+            </div>
+        )}
+    </div>
+);
+
+const QuickActions = ({ editMode, toggleEditMode, onSnapToRoad, isSnapping, points, onSave, isSaving }) => (
+    <div style={styles.quickActions}>
+        <button
+            onClick={toggleEditMode}
+            style={{
+                ...styles.quickActionButton,
+                background: editMode ? '#DC2626' : '#0066CC'
+            }}
+            title={editMode ? 'Stop adding points (Esc)' : 'Add points to map'}
+        >
+            {editMode ? 'Stop Adding' : 'Add Points'}
+        </button>
+        <button
+            onClick={onSnapToRoad}
+            disabled={isSnapping || points.length < 2}
+            style={{
+                ...styles.quickActionButton,
+                background: '#7C3AED'
+            }}
+            title="Snap route to nearest roads"
+        >
+            {isSnapping ? 'Snapping...' : 'Snap to Road'}
+        </button>
+        <button
+            onClick={onSave}
+            disabled={isSaving || points.length < 2}
+            style={{
+                ...styles.quickActionButton,
+                background: '#065F46'
+            }}
+            title="Save route to database"
+        >
+            {isSaving ? 'Saving...' : 'Save Route'}
+        </button>
+    </div>
+);
+
+const AdvancedTools = ({
+                           simplifyTolerance,
+                           setSimplifyTolerance,
+                           onSimplify,
+                           points,
+                           onExport,
+                           isExporting,
+                           activeRoute
+                       }) => (
+    <div style={styles.advancedTools}>
+        <div style={styles.toolGroup}>
+            <div style={styles.toolLabel}>Simplify Route</div>
+            <div style={styles.toolControls}>
+                <input
+                    type="range"
+                    min="0.00001"
+                    max="0.001"
+                    step="0.00001"
+                    value={simplifyTolerance}
+                    onChange={(e) => setSimplifyTolerance(parseFloat(e.target.value))}
+                    style={styles.slider}
+                />
+                <span style={styles.toleranceValue}>
+          {simplifyTolerance.toFixed(5)}
+        </span>
+                <button
+                    onClick={onSimplify}
+                    disabled={points.length < 3}
+                    style={styles.toolButton}
+                >
+                    Simplify
+                </button>
+            </div>
+        </div>
+
+        <div style={styles.toolGroup}>
+            <div style={styles.toolLabel}>Export Route</div>
+            <div style={styles.exportButtons}>
+                <button
+                    onClick={() => onExport('geojson')}
+                    disabled={isExporting || points.length < 2}
+                    style={styles.exportButton}
+                >
+                    {isExporting ? 'Exporting...' : 'GeoJSON'}
+                </button>
+                <button
+                    onClick={() => onExport('gpx')}
+                    disabled={isExporting || points.length < 2}
+                    style={styles.exportButton}
+                >
+                    {isExporting ? 'Exporting...' : 'GPX'}
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
+const RouteSelector = ({ routes, activeRouteId, setActiveRouteId, onDeleteRoute, regions }) => (
+    <div style={styles.card}>
+        <div style={styles.cardTitle}>Select or Create Route</div>
+        <div style={styles.selectRow}>
+            <select
+                value={activeRouteId || ""}
+                onChange={e => setActiveRouteId(e.target.value)}
+                style={styles.select}
+                aria-label="Select route to edit"
+            >
+                <option value="">Create New Route</option>
+                {routes.map(r => (
+                    <option key={r.id} value={r.id}>
+                        {r.name || r.code} {r.regionName ? `(${r.regionName})` : ''}
+                    </option>
+                ))}
+            </select>
+            {activeRouteId && (
+                <button
+                    onClick={() => onDeleteRoute(activeRouteId)}
+                    style={styles.deleteButton}
+                    title="Delete route"
+                    aria-label="Delete selected route"
+                >
+                    Delete
+                </button>
+            )}
+        </div>
+    </div>
+);
+
+const CreateRouteForm = ({ newRoute, setNewRoute, onCreateRoute, isSaving, regions }) => (
+    <div style={styles.card}>
+        <div style={styles.cardTitle}>Create New Route</div>
+        <div style={styles.formGroup}>
+            <div style={styles.label}>Route Name *</div>
+            <input
+                placeholder="e.g., Main Highway Route"
+                value={newRoute.name}
+                onChange={e => setNewRoute(prev => ({ ...prev, name: e.target.value }))}
+                style={styles.input}
+                aria-required="true"
+            />
+        </div>
+        <div style={styles.formGroup}>
+            <div style={styles.label}>Route Code *</div>
+            <input
+                placeholder="e.g., RTE-001"
+                value={newRoute.code}
+                onChange={e => setNewRoute(prev => ({ ...prev, code: e.target.value }))}
+                style={styles.input}
+                aria-required="true"
+            />
+        </div>
+
+        <div style={styles.formGroup}>
+            <div style={styles.label}>Region (Optional)</div>
+            <select
+                value={newRoute.regionId}
+                onChange={e => setNewRoute(prev => ({ ...prev, regionId: e.target.value }))}
+                style={styles.select}
+            >
+                <option value="">No Region</option>
+                {regions.map(region => (
+                    <option key={region.region_id} value={region.region_id}>
+                        {region.name} ({region.code})
+                    </option>
+                ))}
+            </select>
+        </div>
+
+        <button
+            onClick={onCreateRoute}
+            disabled={!newRoute.name.trim() || !newRoute.code.trim() || isSaving}
+            style={styles.createButton}
+            aria-busy={isSaving}
+        >
+            {isSaving ? 'Creating...' : 'Create Route'}
+        </button>
+    </div>
+);
+
+const RouteStats = ({ routeLength, estimatedTime, points }) => (
+    <div style={styles.card}>
+        <div style={styles.cardTitle}>Route Information</div>
+        <div style={styles.statsGrid}>
+            <div style={styles.statCard}>
+                <div style={styles.statContent}>
+                    <div style={styles.statValue}>{routeLength.toFixed(2)} km</div>
+                    <div style={styles.statLabel}>Distance</div>
+                </div>
+            </div>
+            <div style={styles.statCard}>
+                <div style={styles.statContent}>
+                    <div style={styles.statValue}>~{estimatedTime} min</div>
+                    <div style={styles.statLabel}>Estimated Time</div>
+                </div>
+            </div>
+            <div style={styles.statCard}>
+                <div style={styles.statContent}>
+                    <div style={styles.statValue}>{points.length}</div>
+                    <div style={styles.statLabel}>Points</div>
+                </div>
+            </div>
+        </div>
+    </div>
+);
+
+const RegionAssignment = ({ activeRoute, activeRouteId, updateRoute, regions }) => (
+    <div style={styles.card}>
+        <div style={styles.cardTitle}>Region Assignment</div>
+        <div style={styles.regionSection}>
+            <select
+                value={activeRoute.regionId || ""}
+                onChange={e => {
+                    updateRoute(activeRouteId, route => ({
+                        ...route,
+                        regionId: e.target.value || null
+                    }));
+                }}
+                style={styles.select}
+            >
+                <option value="">No Region</option>
+                {regions.map(region => (
+                    <option key={region.region_id} value={region.region_id}>
+                        {region.name}
+                    </option>
+                ))}
+            </select>
+        </div>
+    </div>
+);
+
+const PointItem = ({ point, index, isActive, onSelect, onDelete, onUpdate, pointsLength }) => {
+    const [lng, lat] = point;
+
+    return (
+        <div
+            style={{
+                ...styles.pointItem,
+                borderColor: isActive ? '#0066CC' : '#E2E8F0'
+            }}
+            onClick={() => onSelect(index)}
+        >
+            <div style={styles.pointHeader}>
+                <div style={styles.pointNumber}>
+                    {index + 1}
+                </div>
+                <div style={styles.pointActions}>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(index);
+                        }}
+                        disabled={pointsLength <= 1}
+                        style={styles.pointDelete}
+                        title="Delete point"
+                        aria-label={`Delete point ${index + 1}`}
+                    >
+                        ×
+                    </button>
+                </div>
+            </div>
+            <div style={styles.coordinateInputs}>
+                <div style={styles.coordinateGroup}>
+                    <div style={styles.coordinateLabel}>Longitude</div>
+                    <input
+                        type="text"
+                        value={lng.toFixed(6)}
+                        onChange={e => onUpdate(index, e.target.value, lat)}
+                        onFocus={() => onSelect(index)}
+                        style={styles.coordinateInput}
+                        aria-label={`Longitude for point ${index + 1}`}
+                    />
+                </div>
+                <div style={styles.coordinateGroup}>
+                    <div style={styles.coordinateLabel}>Latitude</div>
+                    <input
+                        type="text"
+                        value={lat.toFixed(6)}
+                        onChange={e => onUpdate(index, lng, e.target.value)}
+                        onFocus={() => onSelect(index)}
+                        style={styles.coordinateInput}
+                        aria-label={`Latitude for point ${index + 1}`}
+                    />
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const PointsList = ({
+                        points,
+                        editMode,
+                        activePointIndex,
+                        setActivePointIndex,
+                        onDeletePoint,
+                        onUpdatePoint,
+                        onClearPoints
+                    }) => (
+    <div style={styles.card}>
+        <div style={styles.pointsHeader}>
+            <div style={styles.cardTitle}>
+                Route Points ({points.length})
+                {editMode && (
+                    <span style={styles.editHint}>
+            Click on map to add points
+          </span>
+                )}
+            </div>
+            <div style={styles.pointActions}>
+                <button
+                    onClick={() => {
+                        if (points.length > 0) {
+                            if (window.confirm("Clear all points? This cannot be undone.")) {
+                                onClearPoints();
+                            }
+                        }
+                    }}
+                    style={styles.clearButton}
+                    disabled={points.length === 0}
+                    title="Remove all points"
+                >
+                    Clear All
+                </button>
+            </div>
+        </div>
+
+        {points.length === 0 ? (
+            <div style={styles.emptyPoints}>
+                <div style={styles.emptyIcon}>📍</div>
+                <div style={styles.emptyTitle}>No points added</div>
+                <div style={styles.emptyMessage}>
+                    Click "Add Points" then click on the map to add route points
+                </div>
+                <div style={styles.emptyHint}>
+                    Click between existing points to insert new ones
+                </div>
+            </div>
+        ) : (
+            <div style={styles.pointsList}>
+                {points.map((point, i) => (
+                    <PointItem
+                        key={i}
+                        point={point}
+                        index={i}
+                        isActive={activePointIndex === i}
+                        onSelect={setActivePointIndex}
+                        onDelete={onDeletePoint}
+                        onUpdate={onUpdatePoint}
+                        pointsLength={points.length}
+                    />
+                ))}
+            </div>
+        )}
+    </div>
+);
+
+// Main RouteEditor Component
+export function RouteEditor({
+                                map,
+                                routes,
+                                setRoutes,
+                                activeRouteId,
+                                setActiveRouteId,
+                                exitEditor,
+                                saveRouteToDatabase,
+                                deleteRouteFromDatabase,
+                                regions = []
+                            }) {
+    // State
+    const [editMode, setEditMode] = useState(false);
+    const [newRoute, setNewRoute] = useState({
+        name: "",
+        code: "",
+        regionId: ""
+    });
+    const [activePointIndex, setActivePointIndex] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isSnapping, setIsSnapping] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+    const [simplifyTolerance, setSimplifyTolerance] = useState(0.0001);
+
+    // Refs
+    const clickHandlerRef = useRef(null);
+    const contentRef = useRef(null);
+
+    // Memoized values
+    const activeRoute = useMemo(
+        () => routes.find(r => r.id === activeRouteId),
+        [routes, activeRouteId]
+    );
+
+    // Custom hooks
+    const pointEditing = usePointEditing(activeRoute?.rawPoints || []);
+    const { clearVisuals, updateVisuals } = useRouteVisualization(
+        map,
+        pointEditing.points,
+        activeRouteId,
+        pointEditing.updatePoint
+    );
+
+    const routeLength = useMemo(
+        () => estimateLength(pointEditing.points),
+        [pointEditing.points]
+    );
+
+    const estimatedTime = useMemo(() => {
+        return Math.round((routeLength / 30) * 60);
+    }, [routeLength]);
+
+    // Update points when active route changes
+    useEffect(() => {
+        if (activeRoute) {
+            pointEditing.resetPoints(activeRoute.rawPoints || []);
+        } else {
+            pointEditing.resetPoints([]);
+        }
+    }, [activeRoute]);
+
+    // Update visualization
+    useEffect(() => {
+        updateVisuals();
+    }, [updateVisuals]);
+
+    // Helper function for distance calculation
+    const distanceToSegment = useCallback((point, segmentStart, segmentEnd) => {
+        const [px, py] = point;
+        const [x1, y1] = segmentStart;
+        const [x2, y2] = segmentEnd;
+
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+
+        if (lenSq !== 0) param = dot / lenSq;
+
+        let xx, yy;
+
+        if (param < 0) {
+            xx = x1;
+            yy = y1;
+        } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+        } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+        }
+
+        const dx = px - xx;
+        const dy = py - yy;
+        return Math.sqrt(dx * dx + dy * dy);
+    }, []);
+
+    /* ---------------- Enhanced Map Click Handler ---------------- */
+    const handleMapClick = useCallback((e) => {
+        if (!editMode || !activeRouteId) return;
+
+        // Get precise coordinates from the click event
+        const { lng, lat } = e.lngLat;
+
+        // Check if we're clicking near an existing point
+        const clickThreshold = 0.0001; // ~11 meters
+        let insertAtIndex = -1;
+
+        for (let i = 0; i < pointEditing.points.length - 1; i++) {
+            const [lng1, lat1] = pointEditing.points[i];
+            const [lng2, lat2] = pointEditing.points[i + 1];
+
+            // Calculate distance to line segment
+            const distance = distanceToSegment([lng, lat], [lng1, lat1], [lng2, lat2]);
+
+            if (distance < clickThreshold) {
+                insertAtIndex = i;
+                break;
             }
         }
-    }, [activeRouteId, activeRoute, map, activePointIndex, updatePoint]);
 
-    /* ---------------- Cleanup ---------------- */
+        pointEditing.addPoint(lng, lat, insertAtIndex);
 
+        // Visual feedback
+        if (map) {
+            const popup = new mapboxgl.Popup({ closeButton: false })
+                .setLngLat([lng, lat])
+                .setHTML(`<div style="padding: 4px; font-size: 12px;">Point added</div>`)
+                .addTo(map);
+
+            setTimeout(() => popup.remove(), 1000);
+        }
+    }, [editMode, activeRouteId, pointEditing, map, distanceToSegment]);
+
+    /* ---------------- Enhanced Snap to Road ---------------- */
+    const snapToRoad = useCallback(async () => {
+        if (pointEditing.points.length < 2) {
+            alert("At least 2 points are required to snap to roads");
+            return;
+        }
+
+        setIsSnapping(true);
+        let abortController = new AbortController();
+
+        try {
+            const coordinates = pointEditing.points
+                .map(p => `${p[0]},${p[1]}`)
+                .join(';');
+
+            const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+
+            if (!accessToken) {
+                throw new Error("Mapbox access token not found");
+            }
+
+            const response = await fetch(
+                `https://api.mapbox.com/matching/v5/mapbox/driving/${coordinates}?access_token=${accessToken}&geometries=geojson&steps=true&overview=simplified`,
+                { signal: abortController.signal }
+            );
+
+            if (!response.ok) {
+                if (response.status === 429) {
+                    throw new Error('Rate limit exceeded. Please try again in a minute.');
+                }
+                throw new Error(`HTTP ${response.status}: Failed to connect to Mapbox`);
+            }
+
+            const data = await response.json();
+
+            if (data.code !== 'Ok' || !data.matchings?.[0]?.geometry?.coordinates) {
+                if (data.code === 'NoSegment') {
+                    throw new Error('No road segment found for these points. Try adding more points.');
+                }
+                throw new Error(`Map matching failed: ${data.message || 'Unknown error'}`);
+            }
+
+            const snappedCoordinates = data.matchings[0].geometry.coordinates;
+            pointEditing.resetPoints(snappedCoordinates);
+
+            // Show success message
+            if (map) {
+                const popup = new mapboxgl.Popup({ closeButton: false })
+                    .setLngLat(snappedCoordinates[Math.floor(snappedCoordinates.length / 2)])
+                    .setHTML('<div style="padding: 8px; background: #10B981; color: white; border-radius: 4px;">✓ Route snapped successfully</div>')
+                    .addTo(map);
+
+                setTimeout(() => popup.remove(), 3000);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('Snap request cancelled');
+                return;
+            }
+            console.error('Error snapping to road:', error);
+            alert(`Failed to snap to roads: ${error.message}`);
+        } finally {
+            setIsSnapping(false);
+        }
+    }, [pointEditing, map]);
+
+    /* ---------------- Route CRUD ---------------- */
+    const createRoute = useCallback(async () => {
+        if (!newRoute.name.trim() || !newRoute.code.trim()) {
+            alert("Please enter route name and code");
+            return;
+        }
+
+        try {
+            setIsSaving(true);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                alert('Please log in to create routes.');
+                return;
+            }
+
+            const routeData = {
+                route_code: newRoute.code.trim(),
+                origin_type: 'field',
+                proposed_by_user_id: user.id,
+                credited_by_operator_id: user.id, // ADD THIS LINE
+                status: 'draft',
+                geometry: {
+                    type: 'LineString',
+                    coordinates: [],
+                    properties: {
+                        color: '#0066CC',
+                        name: newRoute.name.trim()
+                    }
+                },
+                region_id: newRoute.regionId || null,
+                length_meters: 0,
+                last_geometry_update_at: new Date().toISOString()
+            };
+
+            const { data: newRouteDb, error } = await supabase
+                .from('routes')
+                .insert([routeData])
+                .select(`
+          *,
+          region:region_id (
+            region_id,
+            name,
+            code
+          )
+        `)
+                .single();
+
+            if (error) throw error;
+
+            const editorRoute = {
+                id: newRouteDb.id,
+                name: newRoute.name.trim(),
+                code: newRouteDb.route_code,
+                color: '#0066CC',
+                rawPoints: [],
+                snappedPoints: null,
+                regionId: newRouteDb.region_id,
+                regionName: newRouteDb.region?.name,
+                status: newRouteDb.status,
+                length_meters: newRouteDb.length_meters,
+                created_at: newRouteDb.created_at,
+                updated_at: newRouteDb.updated_at
+            };
+
+            setRoutes(prev => [editorRoute, ...prev]);
+            setActiveRouteId(newRouteDb.id);
+            setNewRoute({ name: "", code: "", regionId: "" });
+            pointEditing.resetPoints([]);
+
+            alert(`Route "${newRoute.name.trim()}" created`);
+        } catch (error) {
+            console.error('Error creating route:', error);
+            alert(`Failed: ${error.message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    }, [newRoute, setRoutes, setActiveRouteId, pointEditing]);
+
+    const deleteRoute = useCallback(async (id) => {
+        if (!window.confirm("Are you sure you want to delete this route? This action cannot be undone.")) return;
+
+        try {
+            await deleteRouteFromDatabase(id);
+
+            // Clear points if this was the active route
+            if (activeRouteId === id) {
+                pointEditing.resetPoints([]);
+            }
+
+            alert("Route deleted");
+        } catch (error) {
+            console.error('Error deleting route:', error);
+            alert("Failed to delete route");
+        }
+    }, [activeRouteId, deleteRouteFromDatabase, pointEditing]);
+
+    const saveRoute = useCallback(async () => {
+        if (!activeRoute || pointEditing.points.length < 2) {
+            alert("Route must have at least 2 points");
+            return;
+        }
+
+        try {
+            setIsSaving(true);
+
+            const routeToSave = {
+                ...activeRoute,
+                rawPoints: pointEditing.points,
+                length_meters: routeLength * 1000 // Convert km to meters
+            };
+
+            await saveRouteToDatabase(routeToSave);
+            alert("Route saved successfully");
+        } catch (error) {
+            console.error('Error saving route:', error);
+            alert(`Failed to save route: ${error.message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength]);
+
+    /* ---------------- Enhanced Route Operations ---------------- */
+    const simplifyRoutePoints = useCallback(() => {
+        if (pointEditing.points.length < 3) {
+            alert("Route needs at least 3 points to simplify");
+            return;
+        }
+
+        const simplified = simplifyRoute(pointEditing.points, simplifyTolerance);
+        if (simplified.length < pointEditing.points.length) {
+            pointEditing.resetPoints(simplified);
+            alert(`Simplified from ${pointEditing.points.length} to ${simplified.length} points`);
+        } else {
+            alert("No simplification possible with current tolerance");
+        }
+    }, [pointEditing, simplifyTolerance]);
+
+    const exportRoute = useCallback(async (format = 'geojson') => {
+        if (pointEditing.points.length < 2) {
+            alert("Route must have at least 2 points to export");
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const geojson = {
+                type: "Feature",
+                properties: {
+                    name: activeRoute?.name || "Unnamed Route",
+                    code: activeRoute?.code || "",
+                    length_km: routeLength,
+                    point_count: pointEditing.points.length,
+                    created: new Date().toISOString()
+                },
+                geometry: {
+                    type: "LineString",
+                    coordinates: pointEditing.points
+                }
+            };
+
+            let content, filename, mimeType;
+
+            if (format === 'geojson') {
+                content = JSON.stringify(geojson, null, 2);
+                filename = `${activeRoute?.code || 'route'}.geojson`;
+                mimeType = 'application/geo+json';
+            } else if (format === 'gpx') {
+                // Convert to GPX format
+                const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Route Editor" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${activeRoute?.name || 'Unnamed Route'}</name>
+    <trkseg>
+${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}"></trkpt>`).join('\n')}
+    </trkseg>
+  </trk>
+</gpx>`;
+                content = gpx;
+                filename = `${activeRoute?.code || 'route'}.gpx`;
+                mimeType = 'application/gpx+xml';
+            }
+
+            // Create download link
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            alert(`Route exported as ${format.toUpperCase()}`);
+        } catch (error) {
+            console.error('Error exporting route:', error);
+            alert(`Failed to export route: ${error.message}`);
+        } finally {
+            setIsExporting(false);
+        }
+    }, [pointEditing.points, activeRoute, routeLength]);
+
+    const updateRoute = useCallback((id, updater) => {
+        setRoutes(prev => prev.map(r => (r.id === id ? updater(r) : r)));
+    }, [setRoutes]);
+
+    /* ---------------- Map Interaction Setup ---------------- */
     useEffect(() => {
-        return () => clearEditorVisuals();
-    }, [clearEditorVisuals]);
+        if (!map || !activeRouteId) return;
 
-    /* ---------------- Route Statistics ---------------- */
+        if (editMode) {
+            // Remove any existing click handler
+            if (clickHandlerRef.current) {
+                map.off("click", clickHandlerRef.current);
+            }
 
-    const displayPoints = activeRoute?.snappedPoints || activeRoute?.rawPoints || [];
-    const length = estimateLength(displayPoints);
-    const eta = Math.round((length / 30) * 60);
+            // Add new click handler with better precision
+            clickHandlerRef.current = handleMapClick;
+            map.on("click", handleMapClick);
+
+            map.getCanvas().style.cursor = 'crosshair';
+
+            // Add keyboard shortcuts
+            const handleKeyDown = (e) => {
+                if (e.key === 'Escape') {
+                    setEditMode(false);
+                } else if (e.ctrlKey && e.key === 'z') {
+                    e.preventDefault();
+                    pointEditing.undo();
+                } else if (e.ctrlKey && e.key === 'y') {
+                    e.preventDefault();
+                    pointEditing.redo();
+                }
+            };
+
+            window.addEventListener('keydown', handleKeyDown);
+
+            return () => {
+                map.off("click", handleMapClick);
+                map.getCanvas().style.cursor = '';
+                window.removeEventListener('keydown', handleKeyDown);
+            };
+        } else {
+            map.getCanvas().style.cursor = '';
+        }
+    }, [map, editMode, activeRouteId, handleMapClick, pointEditing]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            clearVisuals();
+        };
+    }, [clearVisuals]);
+
+    const toggleEditMode = useCallback(() => {
+        setEditMode(!editMode);
+        setActivePointIndex(null);
+    }, [editMode]);
 
     return (
         <div style={styles.container}>
-            {/* Header */}
-            <div style={styles.header}>
-                <div>
-                    <h2 style={styles.title}>Route Editor</h2>
-                    <div style={styles.subtitle}>
-                        {activeRoute ? `Editing: ${activeRoute.name}` : "Create new route"}
-                    </div>
-                </div>
-                <button onClick={exitEditor} style={styles.backButton}>
-                    ← Back to Routes
-                </button>
-            </div>
+            <HeaderSection
+                activeRoute={activeRoute}
+                exitEditor={exitEditor}
+                undo={pointEditing.undo}
+                redo={pointEditing.redo}
+                canUndo={pointEditing.canUndo}
+                canRedo={pointEditing.canRedo}
+            />
 
-            {/* Scrollable Content */}
-            <div style={styles.content}>
-                {/* Route Selection */}
-                <div style={styles.card}>
-                    <div style={styles.sectionTitle}>Select or Create Route</div>
-                    <div style={styles.row}>
-                        <select
-                            value={activeRouteId || ""}
-                            onChange={e => {
-                                setActiveRouteId(e.target.value);
-                                setActivePointIndex(null);
-                            }}
-                            style={styles.select}
-                        >
-                            <option value="">Create New Route</option>
-                            {routes.map(r => (
-                                <option key={r.id} value={r.id}>
-                                    {r.name || `Route ${r.code || r.id.slice(0, 8)}`}
-                                </option>
-                            ))}
-                        </select>
-                        {activeRouteId && (
-                            <button
-                                onClick={() => deleteRoute(activeRouteId)}
-                                style={styles.dangerButton}
-                            >
-                                Delete
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {/* Create Route Form */}
-                <div style={styles.card}>
-                    <div style={styles.sectionTitle}>Create New Route</div>
-                    <input
-                        placeholder="Route Name *"
-                        value={routeName}
-                        onChange={e => setRouteName(e.target.value)}
-                        style={styles.input}
-                    />
-                    <input
-                        placeholder="Route Code (Optional)"
-                        value={routeCode}
-                        onChange={e => setRouteCode(e.target.value)}
-                        style={styles.input}
-                    />
-                    <div style={{...styles.row, marginTop: '10px', alignItems: 'center'}}>
-                        <div style={styles.label}>Color:</div>
-                        <input
-                            type="color"
-                            value={routeColor}
-                            onChange={e => setRouteColor(e.target.value)}
-                            style={styles.colorInput}
-                        />
-                        <div style={{...styles.colorPreview, backgroundColor: routeColor}}></div>
-                    </div>
-                    <button
-                        onClick={createRoute}
-                        disabled={!routeName.trim()}
-                        style={{
-                            ...styles.primaryButton,
-                            opacity: !routeName.trim() ? 0.6 : 1
-                        }}
-                    >
-                        Create Route
-                    </button>
-                </div>
-
-                {/* Controls */}
-                <div style={styles.card}>
-                    <div style={styles.sectionTitle}>Editing Controls</div>
-                    <div style={styles.buttonGrid}>
-                        <button
-                            onClick={() => setEditMode(!editMode)}
-                            style={{
-                                ...styles.secondaryButton,
-                                background: editMode ? '#059669' : '#6b7280',
-                                color: '#fff',
-                                border: 'none'
-                            }}
-                        >
-                            {editMode ? '✓ Adding Points' : 'Add Points'}
-                        </button>
-                        <button
-                            onClick={undo}
-                            disabled={!activeRoute?.history?.length}
-                            style={{
-                                ...styles.secondaryButton,
-                                opacity: activeRoute?.history?.length ? 1 : 0.5
-                            }}
-                        >
-                            Undo
-                        </button>
-                        <button
-                            onClick={redo}
-                            disabled={!activeRoute?.future?.length}
-                            style={{
-                                ...styles.secondaryButton,
-                                opacity: activeRoute?.future?.length ? 1 : 0.5
-                            }}
-                        >
-                            Redo
-                        </button>
-                    </div>
-                    <div style={styles.editNote}>
-                        {editMode
-                            ? "Click on the map to add route points"
-                            : "Turn on 'Add Points' to start drawing"}
-                    </div>
-                </div>
-
-                {/* Route Details */}
+            <div ref={contentRef} style={styles.content}>
                 {activeRoute && (
-                    <div style={styles.card}>
-                        <div style={styles.routeHeader}>
-                            <div style={styles.sectionTitle}>Route Details</div>
-                            <div style={styles.statsRow}>
-                                <div style={styles.statItem}>
-                                    <div style={styles.statValue}>{length.toFixed(2)}</div>
-                                    <div style={styles.statLabel}>km</div>
-                                </div>
-                                <div style={styles.statItem}>
-                                    <div style={styles.statValue}>~{eta}</div>
-                                    <div style={styles.statLabel}>min</div>
-                                </div>
-                                <div style={styles.statItem}>
-                                    <div style={styles.statValue}>{displayPoints.length}</div>
-                                    <div style={styles.statLabel}>points</div>
-                                </div>
-                            </div>
-                        </div>
+                    <>
+                        <QuickActions
+                            editMode={editMode}
+                            toggleEditMode={toggleEditMode}
+                            onSnapToRoad={snapToRoad}
+                            isSnapping={isSnapping}
+                            points={pointEditing.points}
+                            onSave={saveRoute}
+                            isSaving={isSaving}
+                        />
 
-                        <div style={styles.pointsHeader}>
-                            <div style={styles.pointsTitle}>Route Points ({activeRoute.rawPoints.length})</div>
-                            <button
-                                onClick={() => {
-                                    const points = activeRoute.rawPoints.map(p => p.join(', ')).join('\n');
-                                    navigator.clipboard.writeText(points);
-                                    alert('Points copied to clipboard');
-                                }}
-                                style={styles.smallButton}
-                            >
-                                Copy All
-                            </button>
-                        </div>
+                        <AdvancedTools
+                            simplifyTolerance={simplifyTolerance}
+                            setSimplifyTolerance={setSimplifyTolerance}
+                            onSimplify={simplifyRoutePoints}
+                            points={pointEditing.points}
+                            onExport={exportRoute}
+                            isExporting={isExporting}
+                            activeRoute={activeRoute}
+                        />
+                    </>
+                )}
 
-                        <div style={styles.pointsContainer}>
-                            {activeRoute.rawPoints.map(([lng, lat], i) => (
-                                <div key={i} style={styles.pointRow}>
-                                    <div style={styles.pointNumber}>{i + 1}</div>
-                                    <input
-                                        value={lng.toFixed(6)}
-                                        onChange={e => updatePoint(i, e.target.value, lat)}
-                                        onFocus={() => setActivePointIndex(i)}
-                                        onBlur={() => setActivePointIndex(null)}
-                                        style={styles.coordinateInput}
-                                        placeholder="Longitude"
-                                    />
-                                    <input
-                                        value={lat.toFixed(6)}
-                                        onChange={e => updatePoint(i, lng, e.target.value)}
-                                        onFocus={() => setActivePointIndex(i)}
-                                        onBlur={() => setActivePointIndex(null)}
-                                        style={styles.coordinateInput}
-                                        placeholder="Latitude"
-                                    />
-                                    <button
-                                        onClick={() => deletePoint(i)}
-                                        disabled={activeRoute.rawPoints.length <= 1}
-                                        style={{
-                                            ...styles.deletePointButton,
-                                            opacity: activeRoute.rawPoints.length <= 1 ? 0.5 : 1
-                                        }}
-                                    >
-                                        ×
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
+                <RouteSelector
+                    routes={routes}
+                    activeRouteId={activeRouteId}
+                    setActiveRouteId={setActiveRouteId}
+                    onDeleteRoute={deleteRoute}
+                    regions={regions}
+                />
 
-                        {activeRoute.rawPoints.length === 0 && (
-                            <div style={styles.emptyState}>
-                                <div style={styles.emptyIcon}>📍</div>
-                                <div style={styles.emptyText}>No points added yet.</div>
-                                <div style={styles.emptySubtext}>Turn on "Add Points" and click on the map to add points.</div>
-                            </div>
-                        )}
-                    </div>
+                {!activeRouteId && (
+                    <CreateRouteForm
+                        newRoute={newRoute}
+                        setNewRoute={setNewRoute}
+                        onCreateRoute={createRoute}
+                        isSaving={isSaving}
+                        regions={regions}
+                    />
+                )}
+
+                {activeRoute && (
+                    <>
+                        <RouteStats
+                            routeLength={routeLength}
+                            estimatedTime={estimatedTime}
+                            points={pointEditing.points}
+                        />
+
+                        <RegionAssignment
+                            activeRoute={activeRoute}
+                            activeRouteId={activeRouteId}
+                            updateRoute={updateRoute}
+                            regions={regions}
+                        />
+
+                        <PointsList
+                            points={pointEditing.points}
+                            editMode={editMode}
+                            activePointIndex={activePointIndex}
+                            setActivePointIndex={setActivePointIndex}
+                            onDeletePoint={pointEditing.deletePoint}
+                            onUpdatePoint={pointEditing.updatePoint}
+                            onClearPoints={pointEditing.clearPoints}
+                        />
+                    </>
                 )}
             </div>
         </div>
@@ -482,42 +1190,89 @@ const styles = {
     container: {
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
-        overflow: 'hidden',
-        fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        background: '#ffffff'
+        height: '100%',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        background: '#F8FAFC',
+        color: '#1E293B'
     },
     header: {
-        padding: '20px',
-        borderBottom: '1px solid #e5e7eb',
-        background: '#ffffff',
+        padding: '16px 20px',
+        borderBottom: '1px solid #E2E8F0',
+        background: '#FFFFFF',
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'flex-start'
+        alignItems: 'center',
+        flexShrink: 0
     },
-    title: {
-        margin: 0,
-        color: '#1f2937',
-        fontSize: '20px',
-        fontWeight: 700,
-        letterSpacing: '-0.025em'
+    headerLeft: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px'
     },
-    subtitle: {
-        color: '#6b7280',
+    undoRedo: {
+        display: 'flex',
+        gap: '4px'
+    },
+    undoButton: {
+        background: '#F1F5F9',
+        border: '1px solid #CBD5E1',
+        color: '#475569',
+        padding: '6px 10px',
+        borderRadius: '4px',
         fontSize: '14px',
-        marginTop: '4px'
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        '&:hover:not(:disabled)': {
+            background: '#E2E8F0'
+        },
+        '&:disabled': {
+            opacity: 0.5,
+            cursor: 'not-allowed'
+        }
+    },
+    redoButton: {
+        background: '#F1F5F9',
+        border: '1px solid #CBD5E1',
+        color: '#475569',
+        padding: '6px 10px',
+        borderRadius: '4px',
+        fontSize: '14px',
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        '&:hover:not(:disabled)': {
+            background: '#E2E8F0'
+        },
+        '&:disabled': {
+            opacity: 0.5,
+            cursor: 'not-allowed'
+        }
     },
     backButton: {
         background: 'transparent',
-        border: '1px solid #d1d5db',
-        color: '#4b5563',
-        padding: '8px 16px',
+        border: '1px solid #CBD5E1',
+        color: '#475569',
+        padding: '8px 12px',
         borderRadius: '6px',
-        cursor: 'pointer',
+        fontSize: '13px',
         fontWeight: 500,
-        fontSize: '14px',
-        transition: 'all 0.2s',
-        whiteSpace: 'nowrap'
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#F1F5F9'
+        }
+    },
+    title: {
+        margin: 0,
+        color: '#1E293B',
+        fontSize: '16px',
+        fontWeight: 600
+    },
+    subtitle: {
+        color: '#64748B',
+        fontSize: '13px',
+        marginTop: '2px',
+        display: 'flex',
+        alignItems: 'center'
     },
     content: {
         flex: 1,
@@ -525,247 +1280,396 @@ const styles = {
         padding: '20px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '15px'
+        gap: '16px'
+    },
+    quickActions: {
+        display: 'flex',
+        gap: '8px',
+        flexWrap: 'wrap'
+    },
+    advancedTools: {
+        background: '#FFFFFF',
+        borderRadius: '6px',
+        padding: '16px',
+        border: '1px solid #E2E8F0',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px'
+    },
+    toolGroup: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
+    },
+    toolLabel: {
+        fontSize: '13px',
+        fontWeight: 500,
+        color: '#475569'
+    },
+    toolControls: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px'
+    },
+    slider: {
+        flex: 1,
+        height: '4px',
+        borderRadius: '2px',
+        background: '#E2E8F0',
+        outline: 'none',
+        '&::-webkit-slider-thumb': {
+            appearance: 'none',
+            width: '16px',
+            height: '16px',
+            borderRadius: '50%',
+            background: '#0066CC',
+            cursor: 'pointer'
+        }
+    },
+    toleranceValue: {
+        fontSize: '12px',
+        color: '#64748B',
+        minWidth: '60px',
+        fontFamily: 'monospace'
+    },
+    toolButton: {
+        background: '#F1F5F9',
+        border: '1px solid #CBD5E1',
+        color: '#475569',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#E2E8F0'
+        },
+        '&:disabled': {
+            opacity: 0.5,
+            cursor: 'not-allowed'
+        }
+    },
+    exportButtons: {
+        display: 'flex',
+        gap: '8px'
+    },
+    exportButton: {
+        flex: 1,
+        background: '#F1F5F9',
+        border: '1px solid #CBD5E1',
+        color: '#475569',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#E2E8F0'
+        },
+        '&:disabled': {
+            opacity: 0.5,
+            cursor: 'not-allowed'
+        }
+    },
+    quickActionButton: {
+        flex: 1,
+        minWidth: '120px',
+        background: '#0066CC',
+        color: '#FFFFFF',
+        border: 'none',
+        padding: '10px 16px',
+        borderRadius: '6px',
+        fontSize: '13px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        '&:hover': {
+            opacity: 0.9
+        },
+        '&:disabled': {
+            opacity: 0.6,
+            cursor: 'not-allowed'
+        }
     },
     card: {
-        background: '#f9fafb',
-        borderRadius: '8px',
-        padding: '20px',
-        border: '1px solid #e5e7eb',
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+        background: '#FFFFFF',
+        borderRadius: '6px',
+        padding: '16px',
+        border: '1px solid #E2E8F0'
     },
-    sectionTitle: {
-        color: '#374151',
-        fontSize: '16px',
+    cardTitle: {
+        color: '#1E293B',
+        fontSize: '14px',
         fontWeight: 600,
-        marginBottom: '15px',
-        letterSpacing: '-0.01em'
-    },
-    row: {
+        marginBottom: '12px',
         display: 'flex',
-        gap: '10px',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+    },
+    editHint: {
+        fontSize: '12px',
+        fontWeight: 'normal',
+        color: '#94A3B8',
+        fontStyle: 'italic'
+    },
+    selectRow: {
+        display: 'flex',
+        gap: '8px',
         alignItems: 'center'
     },
     select: {
         flex: 1,
         padding: '10px 12px',
-        border: '1px solid #d1d5db',
+        border: '1px solid #CBD5E1',
         borderRadius: '6px',
-        fontSize: '14px',
-        background: '#ffffff',
-        color: '#1f2937',
-        cursor: 'pointer'
+        fontSize: '13px',
+        background: '#FFFFFF',
+        color: '#1E293B',
+        cursor: 'pointer',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC',
+            boxShadow: '0 0 0 3px rgba(0,102,204,0.1)'
+        }
+    },
+    deleteButton: {
+        background: '#DC2626',
+        color: '#FFFFFF',
+        border: 'none',
+        padding: '10px 12px',
+        borderRadius: '6px',
+        fontSize: '13px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#B91C1C'
+        }
     },
     input: {
         width: '100%',
         padding: '10px 12px',
-        border: '1px solid #d1d5db',
+        border: '1px solid #CBD5E1',
         borderRadius: '6px',
-        fontSize: '14px',
-        marginBottom: '10px',
-        background: '#ffffff',
-        color: '#1f2937',
-        boxSizing: 'border-box'
+        fontSize: '13px',
+        background: '#FFFFFF',
+        color: '#1E293B',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC',
+            boxShadow: '0 0 0 3px rgba(0,102,204,0.1)'
+        }
+    },
+    formGroup: {
+        marginBottom: '16px'
     },
     label: {
-        color: '#4b5563',
-        fontSize: '14px',
+        color: '#475569',
+        fontSize: '13px',
         fontWeight: 500,
-        minWidth: '50px'
+        marginBottom: '6px',
+        display: 'block'
     },
-    colorInput: {
-        width: '40px',
-        height: '40px',
-        padding: 0,
-        border: '1px solid #d1d5db',
-        borderRadius: '6px',
-        cursor: 'pointer'
-    },
-    colorPreview: {
-        width: '24px',
-        height: '24px',
-        borderRadius: '4px',
-        border: '1px solid #d1d5db',
-        marginLeft: '10px'
-    },
-    primaryButton: {
+    createButton: {
         width: '100%',
-        background: '#1d4ed8',
-        color: '#ffffff',
+        background: '#0066CC',
+        color: '#FFFFFF',
         border: 'none',
         padding: '12px',
         borderRadius: '6px',
         fontSize: '14px',
-        fontWeight: 600,
-        cursor: 'pointer',
-        marginTop: '10px',
-        transition: 'background-color 0.2s'
-    },
-    secondaryButton: {
-        flex: 1,
-        background: '#ffffff',
-        color: '#4b5563',
-        border: '1px solid #d1d5db',
-        padding: '10px',
-        borderRadius: '6px',
-        fontSize: '14px',
         fontWeight: 500,
         cursor: 'pointer',
-        transition: 'all 0.2s'
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#0052A3'
+        },
+        '&:disabled': {
+            opacity: 0.6,
+            cursor: 'not-allowed'
+        }
     },
-    editNote: {
-        marginTop: '15px',
-        padding: '10px',
-        background: '#f3f4f6',
-        borderRadius: '6px',
-        fontSize: '14px',
-        color: '#6b7280',
-        textAlign: 'center',
-        border: '1px solid #e5e7eb'
-    },
-    dangerButton: {
-        background: '#dc2626',
-        color: '#ffffff',
-        border: 'none',
-        padding: '10px 16px',
-        borderRadius: '6px',
-        fontSize: '14px',
-        fontWeight: 500,
-        cursor: 'pointer',
-        minWidth: '80px',
-        transition: 'background-color 0.2s'
-    },
-    buttonGrid: {
+    statsGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '10px'
+        gap: '12px'
     },
-    routeHeader: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: '20px',
-        flexWrap: 'wrap',
-        gap: '15px'
-    },
-    statsRow: {
-        display: 'flex',
-        gap: '12px',
-        alignItems: 'center'
-    },
-    statItem: {
-        textAlign: 'center',
-        padding: '10px 12px',
-        background: '#ffffff',
+    statCard: {
+        padding: '12px',
+        background: '#F8FAFC',
         borderRadius: '6px',
-        border: '1px solid #e5e7eb',
-        minWidth: '70px'
+        border: '1px solid #E2E8F0'
+    },
+    statContent: {
+        display: 'flex',
+        flexDirection: 'column'
     },
     statValue: {
         fontSize: '16px',
-        fontWeight: 700,
-        color: '#1f2937',
+        fontWeight: 600,
+        color: '#1E293B',
         marginBottom: '2px'
     },
     statLabel: {
         fontSize: '12px',
-        color: '#6b7280',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em'
+        color: '#64748B'
+    },
+    regionSection: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
     },
     pointsHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '15px',
-        paddingBottom: '10px',
-        borderBottom: '1px solid #e5e7eb'
+        marginBottom: '12px'
     },
-    pointsTitle: {
-        color: '#4b5563',
-        fontSize: '15px',
-        fontWeight: 600
-    },
-    smallButton: {
-        background: 'transparent',
-        border: '1px solid #d1d5db',
-        color: '#4b5563',
-        padding: '6px 12px',
-        borderRadius: '5px',
-        fontSize: '13px',
-        cursor: 'pointer',
-        transition: 'all 0.2s'
-    },
-    pointsContainer: {
-        maxHeight: '300px',
-        overflowY: 'auto',
-        marginTop: '10px'
-    },
-    pointRow: {
+    pointActions: {
         display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        marginBottom: '8px',
-        padding: '10px',
-        background: '#ffffff',
+        gap: '8px'
+    },
+    clearButton: {
+        background: 'transparent',
+        border: '1px solid #CBD5E1',
+        color: '#64748B',
+        padding: '6px 10px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#F1F5F9'
+        },
+        '&:disabled': {
+            opacity: 0.5,
+            cursor: 'not-allowed'
+        }
+    },
+    emptyPoints: {
+        padding: '40px 20px',
+        textAlign: 'center',
+        color: '#94A3B8',
+        background: '#F8FAFC',
         borderRadius: '6px',
-        border: '1px solid #e5e7eb',
-        transition: 'all 0.2s'
+        border: '2px dashed #E2E8F0'
+    },
+    emptyIcon: {
+        fontSize: '32px',
+        marginBottom: '12px'
+    },
+    emptyTitle: {
+        fontSize: '14px',
+        fontWeight: 500,
+        marginBottom: '4px',
+        color: '#64748B'
+    },
+    emptyMessage: {
+        fontSize: '13px',
+        maxWidth: '250px',
+        margin: '0 auto 8px',
+        lineHeight: '1.4'
+    },
+    emptyHint: {
+        fontSize: '12px',
+        color: '#94A3B8',
+        fontStyle: 'italic'
+    },
+    pointsList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        maxHeight: '300px',
+        overflowY: 'auto'
+    },
+    pointItem: {
+        padding: '12px',
+        background: '#F8FAFC',
+        borderRadius: '4px',
+        border: '2px solid #E2E8F0',
+        cursor: 'pointer',
+        transition: 'border-color 0.2s',
+        '&:hover': {
+            borderColor: '#CBD5E1'
+        }
+    },
+    pointHeader: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '8px'
     },
     pointNumber: {
-        width: '28px',
-        height: '28px',
-        background: '#1d4ed8',
-        color: '#ffffff',
+        width: '24px',
+        height: '24px',
+        background: '#0066CC',
+        color: '#FFFFFF',
         borderRadius: '50%',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '13px',
-        fontWeight: 600,
+        fontSize: '12px',
+        fontWeight: 500,
         flexShrink: 0
     },
-    coordinateInput: {
-        flex: 1,
-        padding: '8px 10px',
-        border: '1px solid #d1d5db',
-        borderRadius: '5px',
-        fontSize: '14px',
-        background: '#ffffff',
-        color: '#1f2937',
-        fontFamily: 'monospace'
-    },
-    deletePointButton: {
-        width: '28px',
-        height: '28px',
-        background: '#ef4444',
-        color: '#ffffff',
+    pointDelete: {
+        width: '24px',
+        height: '24px',
+        background: '#DC2626',
+        color: '#FFFFFF',
         border: 'none',
-        borderRadius: '5px',
+        borderRadius: '4px',
         fontSize: '16px',
+        fontWeight: 'bold',
         cursor: 'pointer',
-        flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'background-color 0.2s'
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#B91C1C'
+        },
+        '&:disabled': {
+            opacity: 0.5,
+            cursor: 'not-allowed'
+        }
     },
-    emptyState: {
-        textAlign: 'center',
-        padding: '40px 20px',
-        color: '#9ca3af'
+    coordinateInputs: {
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '12px'
     },
-    emptyIcon: {
-        fontSize: '32px',
-        marginBottom: '10px'
+    coordinateGroup: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px'
     },
-    emptyText: {
-        fontSize: '16px',
-        fontWeight: 600,
-        marginBottom: '8px',
-        color: '#6b7280'
+    coordinateLabel: {
+        fontSize: '11px',
+        color: '#64748B',
+        fontWeight: 500,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em'
     },
-    emptySubtext: {
-        fontSize: '14px'
+    coordinateInput: {
+        padding: '8px 10px',
+        border: '1px solid #CBD5E1',
+        borderRadius: '4px',
+        fontSize: '13px',
+        background: '#FFFFFF',
+        color: '#1E293B',
+        fontFamily: 'monospace',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC',
+            boxShadow: '0 0 0 2px rgba(0,102,204,0.1)'
+        }
     }
 };

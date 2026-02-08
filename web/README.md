@@ -53,7 +53,41 @@ System-Staff:
 * **Automation Dashboard**: Data Ingestion Pipelines, GPS Health, API runtime, Mapbox Quota USage
 * **Internal Health Metrics**: Operators track: Regions onboarded per month, Time-to-deploy per region, Active Routes per Staff Memeber, Support Load Trends
 
-SinYourH3@@20715030
+**public.users**
+Canonical user identity synced from Supabase Auth. One row per person, no passwords stored. Base for all roles and access.
+
+**public.user_roles**
+Explicit role assignments (admin, operator, field_operator, driver, passenger). Roles are granted, tracked, and revocable.
+
+**public.drivers**
+Driver-specific operational profile. Separates “being a user” from “being a driver,” with privacy-safe licensing and status.
+
+**public.passengers**
+Passenger abstraction focused on demand generation, with anonymization controls.
+
+**public.routes**
+Core table holding all route data in one atomic record. Single bidirectional routes, optimized for frequent movement and multi-actor access. Routes are credited, not approved.
+
+**public.route_history**
+Append-only audit log of every route change. Enables rollback, conflict resolution, and forensic analysis.
+
+**public.route_conflicts**
+Tracks disagreements or competing geometries. Conflicts are treated as first-class data until resolved by operators.
+
+**public.points_of_interest**
+Stops, terminals, and landmarks stored separately for reuse and independent validation.
+
+**public.driver_traces**
+High-volume, partitioned GPS evidence from drivers showing real-world route usage.
+
+**public.passenger_events**
+Partitioned, privacy-safe demand and validation signals from passengers (boarding, waiting, drop-offs, etc.).
+
+**public.route_confidence_scores**
+Computed trust metrics for routes, derived from driver GPS, passenger data, field operator input, and conflict outcomes.
+
+**public.audit_logs**
+System-wide accountability layer for governance, abuse detection, and regulatory audits.
 
 name: lAKBAY
 822920260206 / coreoperator@etranspo.com : yvX)ZT!^

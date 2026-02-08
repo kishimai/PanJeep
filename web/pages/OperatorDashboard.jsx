@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import AccountManagement from "../src/AccountManagement";
 import { RouteManager } from "../src/RouteManager.jsx";
+import { RegionManagement } from "../src/RegionManagement.jsx";
 
 export function OperatorDashboard({ profile }) {
     const operatorTabs = [
@@ -10,7 +11,7 @@ export function OperatorDashboard({ profile }) {
         { id: "support-tickets", label: "Support Tickets" },
         { id: "data-quality", label: "Data Quality" },
         { id: "account-management", label: "Account Management" },
-        { id: "client-management", label: "Client Management" },
+        { id: "region-management", label: "Regions" },
     ];
 
     const [activeTab, setActiveTab] = useState("summary");
@@ -29,6 +30,9 @@ export function OperatorDashboard({ profile }) {
                         <RouteManager operatorId={profile?.id || "SYSTEM"} />
                     </div>
                 );
+            case "region-management":
+                return <RegionManagement />
+
             default:
                 return (
                     <div style={placeholderStyle}>

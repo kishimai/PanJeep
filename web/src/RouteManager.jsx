@@ -1,418 +1,921 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { RouteEditor } from "./RouteEditor.jsx";
 import { estimateLength } from "./routeUtils.jsx";
+import { supabase } from "./supabase";
 
-export function RouteManager({ operatorId }) {
-    const mapContainer = useRef(null);
+// Custom Hook: Mapbox Initialization
+const useMapbox = (containerRef) => {
     const [map, setMap] = useState(null);
-    const [routes, setRoutes] = useState([]);
-    const [activeRouteId, setActiveRouteId] = useState(null);
-    const [selectedRouteId, setSelectedRouteId] = useState(null);
-    const [viewEditRoute, setViewEditRoute] = useState(false);
-    const [selectedRegionFilter, setSelectedRegionFilter] = useState("");
-
-    const [regions] = useState([
-        { id: 1, name: "North Region" },
-        { id: 2, name: "South Region" },
-        { id: 3, name: "East Region" },
-        { id: 4, name: "West Region" }
-    ]);
-
-    const selectedRoute = useMemo(
-        () => routes.find(r => r.id === selectedRouteId),
-        [routes, selectedRouteId]
-    );
-
-    const routeLayersRef = useRef(new Set());
-
-    /* ---------------- Map Initialization ---------------- */
+    const [mapLoaded, setMapLoaded] = useState(false);
 
     useEffect(() => {
-        if (!mapContainer.current) return;
+        if (!containerRef.current) return;
+
+        const accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+        if (!accessToken) {
+            console.error("Mapbox access token is missing!");
+            return;
+        }
+
+        mapboxgl.accessToken = accessToken;
 
         const mapInstance = new mapboxgl.Map({
-            container: mapContainer.current,
+            container: containerRef.current,
             style: "mapbox://styles/mapbox/light-v11",
             center: [120.9842, 14.5995],
             zoom: 12,
             minZoom: 10,
             maxZoom: 18,
-            attributionControl: true
+            attributionControl: true,
+            antialias: true,
+            pitchWithRotate: false
         });
 
-        mapInstance.addControl(new mapboxgl.NavigationControl(), 'top-right');
+        mapInstance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+        mapInstance.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
+
         mapInstance.dragRotate.disable();
+        mapInstance.touchZoomRotate.disableRotation();
         mapInstance.keyboard.disableRotation();
 
-        setMap(mapInstance);
+        mapInstance.on('load', () => {
+            setMapLoaded(true);
+            setMap(mapInstance);
+        });
+
+        mapInstance.on('error', (e) => {
+            console.error('Mapbox error:', e.error);
+        });
 
         return () => {
-            routeLayersRef.current.forEach(layerId => {
-                if (mapInstance.getLayer(layerId)) mapInstance.removeLayer(layerId);
-                const sourceId = layerId.replace('route-line-', 'route-');
-                if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
-            });
-            routeLayersRef.current.clear();
             mapInstance.remove();
         };
+    }, [containerRef]);
+
+    return { map, mapLoaded };
+};
+
+// Custom Hook: Regions Management
+const useRegions = () => {
+    const [regions, setRegions] = useState([]);
+    const [isLoadingRegions, setIsLoadingRegions] = useState(false);
+
+    const fetchRegions = useCallback(async () => {
+        setIsLoadingRegions(true);
+        try {
+            const { data, error } = await supabase
+                .from('regions')
+                .select('region_id, name, code, type, geographic_level, is_active')
+                .eq('is_active', true)
+                .order('name');
+
+            if (error) throw error;
+            setRegions(data || []);
+        } catch (error) {
+            console.error('Error fetching regions:', error);
+        } finally {
+            setIsLoadingRegions(false);
+        }
     }, []);
 
-    /* ---------------- Route Drawing ---------------- */
+    return { regions, isLoadingRegions, fetchRegions };
+};
 
-    const drawRoutes = useCallback(() => {
+// Custom Hook: Routes Management
+const useRoutes = (regionFilter = '') => {
+    const [routes, setRoutes] = useState([]);
+    const [isLoadingRoutes, setIsLoadingRoutes] = useState(true);
+    const [routesError, setRoutesError] = useState(null);
+
+    const fetchRoutes = useCallback(async () => {
+        setIsLoadingRoutes(true);
+        setRoutesError(null);
+
+        try {
+            let query = supabase
+                .from('routes')
+                .select(`
+          *,
+          region:region_id (
+            region_id,
+            name,
+            code
+          )
+        `)
+                .is('deleted_at', null)
+                .neq('status', 'deprecated')
+                .order('created_at', { ascending: false });
+
+            if (regionFilter && regionFilter !== "unassigned") {
+                query = query.eq('region_id', regionFilter);
+            } else if (regionFilter === "unassigned") {
+                query = query.is('region_id', null);
+            }
+
+            const { data, error } = await query;
+
+            if (error) throw error;
+
+            const transformedRoutes = (data || []).map(dbRoute => ({
+                id: dbRoute.id,
+                name: dbRoute.geometry?.properties?.name || dbRoute.route_code,
+                code: dbRoute.route_code,
+                color: '#0066CC',
+                rawPoints: dbRoute.geometry?.coordinates || [],
+                snappedPoints: dbRoute.stops_snapshot?.coordinates || null,
+                regionId: dbRoute.region_id,
+                regionName: dbRoute.region?.name,
+                status: dbRoute.status,
+                length_meters: dbRoute.length_meters,
+                created_at: dbRoute.created_at,
+                updated_at: dbRoute.updated_at,
+                credited_by_operator_id: dbRoute.credited_by_operator_id,
+            }));
+
+            setRoutes(transformedRoutes);
+        } catch (error) {
+            console.error('Error fetching routes:', error);
+            setRoutesError(error);
+        } finally {
+            setIsLoadingRoutes(false);
+        }
+    }, [regionFilter]);
+
+    return { routes, isLoadingRoutes, routesError, fetchRoutes, setRoutes };
+};
+
+// Custom Hook: Route Visualization
+const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
+    const routeLayersRef = useRef(new Set());
+    const routeSourcesRef = useRef(new Set());
+
+    const clearAllRouteLayers = useCallback(() => {
+        if (!map) return;
+
+        // Remove all event listeners
+        routeLayersRef.current.forEach(layerId => {
+            try {
+                map.off("click", layerId);
+                map.off("mouseenter", layerId);
+                map.off("mouseleave", layerId);
+            } catch (e) {
+                // Ignore errors for non-existent listeners
+            }
+        });
+
+        // Remove all layers
+        routeLayersRef.current.forEach(layerId => {
+            try {
+                if (map.getLayer(layerId)) {
+                    map.removeLayer(layerId);
+                }
+            } catch (e) {
+                console.warn('Error removing layer:', e);
+            }
+        });
+
+        // Remove all sources
+        routeSourcesRef.current.forEach(sourceId => {
+            try {
+                if (map.getSource(sourceId)) {
+                    map.removeSource(sourceId);
+                }
+            } catch (e) {
+                console.warn('Error removing source:', e);
+            }
+        });
+
+        // Clear the refs
+        routeLayersRef.current.clear();
+        routeSourcesRef.current.clear();
+    }, [map]);
+
+    const drawRoutes = useCallback((routesToDraw) => {
         if (!map || !map.isStyleLoaded()) return;
 
-        routes.forEach(route => {
-            const points = route.snappedPoints ?? route.rawPoints;
+        // Clear existing event listeners
+        routeLayersRef.current.forEach(layerId => {
+            map.off("click", layerId);
+            map.off("mouseenter", layerId);
+            map.off("mouseleave", layerId);
+        });
+
+        clearAllRouteLayers();
+
+        routesToDraw.forEach(route => {
+            const points = route.rawPoints;
             if (!points || points.length < 2) return;
 
-            const sourceId = `route-${route.id}`;
+            const sourceId = `route-source-${route.id}`;
             const lineId = `route-line-${route.id}`;
+            const hoverLayerId = `route-hover-${route.id}`;
 
             const geojson = {
                 type: "Feature",
                 geometry: { type: "LineString", coordinates: points }
             };
 
-            if (map.getSource(sourceId)) {
+            try {
+                // Add source
+                if (!map.getSource(sourceId)) {
+                    map.addSource(sourceId, { type: "geojson", data: geojson });
+                    routeSourcesRef.current.add(sourceId);
+                }
+
+                // Add line layer
+                if (!map.getLayer(lineId)) {
+                    map.addLayer({
+                        id: lineId,
+                        type: "line",
+                        source: sourceId,
+                        layout: {
+                            "line-join": "round",
+                            "line-cap": "round"
+                        },
+                        paint: {
+                            "line-color": selectedRouteId === route.id ? '#003366' : '#0066CC',
+                            "line-width": selectedRouteId === route.id ? 4 : 3,
+                            "line-opacity": selectedRouteId === route.id ? 1 : 0.8
+                        }
+                    });
+                    routeLayersRef.current.add(lineId);
+                }
+
+                // Add invisible hover layer
+                if (!map.getLayer(hoverLayerId)) {
+                    map.addLayer({
+                        id: hoverLayerId,
+                        type: "line",
+                        source: sourceId,
+                        layout: {
+                            "line-join": "round",
+                            "line-cap": "round"
+                        },
+                        paint: {
+                            "line-color": route.color,
+                            "line-width": 20,
+                            "line-opacity": 0
+                        }
+                    });
+                    routeLayersRef.current.add(hoverLayerId);
+                }
+
+                // Update source data
                 map.getSource(sourceId).setData(geojson);
-            } else {
-                map.addSource(sourceId, { type: "geojson", data: geojson });
-                map.addLayer({
-                    id: lineId,
-                    type: "line",
-                    source: sourceId,
-                    layout: { "line-join": "round", "line-cap": "round" },
-                    paint: {
-                        "line-color": route.color,
-                        "line-width": selectedRouteId === route.id ? 5 : 3,
-                        "line-opacity": selectedRouteId === route.id ? 0.9 : 0.5
+
+                // Update line appearance based on selection
+                map.setPaintProperty(lineId, 'line-color', selectedRouteId === route.id ? '#003366' : '#0066CC');
+                map.setPaintProperty(lineId, 'line-width', selectedRouteId === route.id ? 4 : 3);
+                map.setPaintProperty(lineId, 'line-opacity', selectedRouteId === route.id ? 1 : 0.8);
+
+                // Add event handlers
+                const handleClick = () => {
+                    onRouteSelect(route);
+
+                    if (points.length > 0) {
+                        const bounds = points.reduce((bounds, coord) => {
+                            return bounds.extend(coord);
+                        }, new mapboxgl.LngLatBounds(points[0], points[0]));
+
+                        map.fitBounds(bounds, {
+                            padding: { top: 50, bottom: 50, left: 50, right: 400 },
+                            duration: 1000
+                        });
                     }
-                });
+                };
 
-                map.on("click", lineId, () => {
-                    setSelectedRouteId(route.id);
-                    setActiveRouteId(route.id);
-                });
+                const handleMouseEnter = () => {
+                    map.getCanvas().style.cursor = 'pointer';
+                };
 
-                routeLayersRef.current.add(lineId);
+                const handleMouseLeave = () => {
+                    map.getCanvas().style.cursor = '';
+                };
+
+                map.on("click", hoverLayerId, handleClick);
+                map.on("mouseenter", hoverLayerId, handleMouseEnter);
+                map.on("mouseleave", hoverLayerId, handleMouseLeave);
+
+            } catch (error) {
+                console.warn(`Error drawing route ${route.id}:`, error);
             }
         });
-    }, [map, routes, selectedRouteId, activeRouteId]);
+    }, [map, selectedRouteId, clearAllRouteLayers, onRouteSelect]);
 
-    useEffect(() => {
-        if (!map) return;
+    return { drawRoutes, clearAllRouteLayers };
+};
 
-        if (map.isStyleLoaded()) {
-            drawRoutes();
-        } else {
-            map.once("load", drawRoutes);
+// UI Components
+const Header = ({ isLoading, filteredRoutes, selectedRegionFilter, getRegionName, onNewRoute }) => (
+    <div style={styles.header}>
+        <div>
+            <div style={styles.title}>Route Manager</div>
+            <div style={styles.subtitle}>
+                {isLoading ? 'Loading...' : `${filteredRoutes.length} routes`}
+                {selectedRegionFilter && ` • ${getRegionName(selectedRegionFilter)}`}
+            </div>
+        </div>
+        <button onClick={onNewRoute} style={styles.primaryButton}>
+            New Route
+        </button>
+    </div>
+);
+
+const FilterSection = ({
+                           regions,
+                           selectedRegionFilter,
+                           onRegionChange,
+                           searchQuery,
+                           onSearchChange,
+                           getRegionRouteCount
+                       }) => (
+    <>
+        <div style={styles.filtersSection}>
+            <div style={styles.searchContainer}>
+                <input
+                    type="text"
+                    placeholder="Search routes..."
+                    value={searchQuery}
+                    onChange={(e) => onSearchChange(e.target.value)}
+                    style={styles.searchInput}
+                />
+            </div>
+        </div>
+
+        <div style={styles.section}>
+            <div style={styles.sectionTitle}>Filter by Region</div>
+            <div style={styles.filterRow}>
+                <select
+                    value={selectedRegionFilter}
+                    onChange={(e) => onRegionChange(e.target.value)}
+                    style={styles.select}
+                >
+                    <option value="">All Regions</option>
+                    {regions.map(region => (
+                        <option key={region.region_id} value={region.region_id}>
+                            {region.name} ({region.type}) • {getRegionRouteCount(region.region_id)}
+                        </option>
+                    ))}
+                    <option value="unassigned">
+                        Unassigned • {getRegionRouteCount("unassigned")}
+                    </option>
+                </select>
+                {selectedRegionFilter && (
+                    <button
+                        onClick={() => onRegionChange("")}
+                        style={styles.clearFilterButton}
+                    >
+                        Clear
+                    </button>
+                )}
+            </div>
+        </div>
+    </>
+);
+
+const RouteItem = React.memo(({
+                                  route,
+                                  isSelected,
+                                  onClick,
+                                  onEdit,
+                                  onDuplicate,
+                                  onDelete
+                              }) => (
+    <div
+        onClick={() => onClick(route)}
+        style={{
+            ...styles.routeItem,
+            borderLeft: `3px solid ${isSelected ? '#003366' : '#0066CC'}`,
+            background: isSelected ? '#F0F7FF' : '#fff'
+        }}
+    >
+        <div style={styles.routeHeader}>
+            <div>
+                <div style={styles.routeName}>{route.name || route.code}</div>
+                <div style={styles.routeSubtitle}>
+                    {route.regionName || "No region assigned"}
+                    {route.snappedPoints && (
+                        <span style={styles.snappedBadge}>
+              Snapped
+            </span>
+                    )}
+                </div>
+            </div>
+            <div style={styles.routeBadges}>
+        <span style={{
+            ...styles.badgeStatus,
+            background: route.status === 'draft' ? '#F3F4F6' :
+                route.status === 'active' ? '#D1FAE5' : '#FEF3C7',
+            color: route.status === 'draft' ? '#374151' :
+                route.status === 'active' ? '#065F46' : '#92400E'
+        }}>
+          {route.status}
+        </span>
+            </div>
+        </div>
+
+        <div style={styles.routeDetails}>
+            <div style={styles.routeDetail}>
+                <span style={styles.detailIcon}>Length:</span>
+                {route.length_meters ? `${(route.length_meters / 1000).toFixed(1)} km` : 'N/A'}
+            </div>
+            <div style={styles.routeDetail}>
+                <span style={styles.detailIcon}>Points:</span>
+                {route.rawPoints.length}
+            </div>
+        </div>
+
+        <div style={styles.routeActions}>
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(route);
+                }}
+                style={styles.smallButton}
+                title="Edit route"
+            >
+                Edit
+            </button>
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onDuplicate(route.id);
+                }}
+                style={styles.smallButton}
+                title="Duplicate route"
+            >
+                Duplicate
+            </button>
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(route.id);
+                }}
+                style={{...styles.smallButton, color: '#DC2626'}}
+                title="Delete route"
+            >
+                Delete
+            </button>
+        </div>
+    </div>
+));
+
+const RouteListSkeleton = () => (
+    <div style={styles.loading}>
+        <div style={styles.spinner}></div>
+        <div>Loading routes...</div>
+    </div>
+);
+
+const RouteDetailsCard = ({ route, regions, onEdit, onSave, onAssignRegion }) => (
+    <div style={styles.selectedRouteCard}>
+        <div style={styles.selectedRouteHeader}>
+            <div>
+                <div style={styles.selectedRouteTitle}>{route.name || route.code}</div>
+                <div style={styles.selectedRouteSubtitle}>
+                    {route.regionName || "No region assigned"}
+                </div>
+            </div>
+            <span style={{
+                ...styles.selectedStatusBadge,
+                background: route.status === 'draft' ? '#F3F4F6' :
+                    route.status === 'active' ? '#D1FAE5' : '#FEF3C7',
+                color: route.status === 'draft' ? '#374151' :
+                    route.status === 'active' ? '#065F46' : '#92400E'
+            }}>
+        {route.status}
+      </span>
+        </div>
+
+        <div style={styles.selectedRouteGrid}>
+            <div style={styles.selectedRouteStat}>
+                <div style={styles.selectedRouteStatContent}>
+                    <div style={styles.selectedRouteStatLabel}>Distance</div>
+                    <div style={styles.selectedRouteStatValue}>
+                        {route.length_meters ? `${(route.length_meters / 1000).toFixed(2)} km` : 'N/A'}
+                    </div>
+                </div>
+            </div>
+            <div style={styles.selectedRouteStat}>
+                <div style={styles.selectedRouteStatContent}>
+                    <div style={styles.selectedRouteStatLabel}>Estimated Time</div>
+                    <div style={styles.selectedRouteStatValue}>
+                        {route.length_meters ?
+                            `${Math.round((route.length_meters / 1000 / 30) * 60)} min` : 'N/A'}
+                    </div>
+                </div>
+            </div>
+            <div style={styles.selectedRouteStat}>
+                <div style={styles.selectedRouteStatContent}>
+                    <div style={styles.selectedRouteStatLabel}>Points</div>
+                    <div style={styles.selectedRouteStatValue}>
+                        {route.rawPoints.length}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style={styles.regionSelector}>
+            <div style={styles.regionLabel}>Assign Region</div>
+            <select
+                value={route.regionId || ""}
+                onChange={(e) => onAssignRegion(route.id, e.target.value)}
+                style={styles.regionSelect}
+            >
+                <option value="">Select Region</option>
+                {regions.map(region => (
+                    <option key={region.region_id} value={region.region_id}>
+                        {region.name} ({region.type})
+                    </option>
+                ))}
+            </select>
+        </div>
+
+        <div style={styles.routeActions}>
+            <button
+                onClick={onEdit}
+                style={styles.primaryButton}
+            >
+                Edit Route
+            </button>
+            <button
+                onClick={async () => {
+                    try {
+                        await onSave(route);
+                        alert('Route saved successfully');
+                    } catch (error) {
+                        // Error handled in function
+                    }
+                }}
+                style={styles.secondaryButton}
+            >
+                Save Route
+            </button>
+        </div>
+    </div>
+);
+
+const EmptyState = ({ searchQuery, selectedRegionFilter, getRegionName, onCreateNew }) => (
+    <div style={styles.emptyState}>
+        <div style={styles.emptyTitle}>
+            {searchQuery ? "No matching routes" :
+                selectedRegionFilter ? `No routes in ${getRegionName(selectedRegionFilter)}`
+                    : "No routes created"}
+        </div>
+        <div style={styles.emptyText}>
+            {searchQuery ? "Try a different search term" :
+                "Create your first route to get started"}
+        </div>
+        <button onClick={onCreateNew} style={styles.emptyButton}>
+            Create New Route
+        </button>
+    </div>
+);
+
+// Main Component
+export function RouteManager({ operatorId }) {
+    const mapContainer = useRef(null);
+    const { map, mapLoaded } = useMapbox(mapContainer);
+
+    const [selectedRegionFilter, setSelectedRegionFilter] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
+    const [viewEditRoute, setViewEditRoute] = useState(false);
+    const [selectedRouteId, setSelectedRouteId] = useState(null);
+    const [activeRouteId, setActiveRouteId] = useState(null);
+
+    const { regions, isLoadingRegions, fetchRegions } = useRegions();
+    const { routes, isLoadingRoutes, routesError, fetchRoutes, setRoutes } = useRoutes(selectedRegionFilter);
+
+    const getRegionName = useCallback((regionId) => {
+        if (regionId === "unassigned") return "Unassigned";
+        const region = regions.find(r => r.region_id === regionId);
+        return region ? region.name : "Unknown Region";
+    }, [regions]);
+
+    const getRegionRouteCount = useCallback((regionId) => {
+        if (regionId === "unassigned") {
+            return routes.filter(r => !r.regionId).length;
+        }
+        return routes.filter(r => r.regionId === regionId).length;
+    }, [routes]);
+
+    const filteredRoutes = useMemo(() => {
+        let result = routes;
+
+        // Apply region filter
+        if (selectedRegionFilter) {
+            if (selectedRegionFilter === "unassigned") {
+                result = result.filter(route => !route.regionId);
+            } else {
+                result = result.filter(route => route.regionId === selectedRegionFilter);
+            }
         }
 
-        return () => {
-            if (map) {
-                routeLayersRef.current.forEach(layerId => {
-                    map.off("click", layerId);
-                });
-            }
-        };
-    }, [map, drawRoutes]);
+        // Apply search filter
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            result = result.filter(route =>
+                route.name.toLowerCase().includes(query) ||
+                route.code.toLowerCase().includes(query) ||
+                (route.regionName && route.regionName.toLowerCase().includes(query))
+            );
+        }
 
-    /* ---------------- Helper Functions ---------------- */
+        return result;
+    }, [routes, selectedRegionFilter, searchQuery]);
 
-    const getRegionName = useCallback((id) =>
-            regions.find(r => r.id === id)?.name ?? "Unassigned",
-        [regions]);
+    const selectedRoute = useMemo(
+        () => routes.find(r => r.id === selectedRouteId),
+        [routes, selectedRouteId]
+    );
 
-    const assignRegion = useCallback((routeId, regionId) => {
-        setRoutes(prev =>
-            prev.map(r =>
-                r.id === routeId ? { ...r, regionId: Number(regionId) } : r
-            )
-        );
+    const handleRouteSelect = useCallback((route) => {
+        setSelectedRouteId(route.id);
+        setActiveRouteId(route.id);
     }, []);
 
-    const duplicateRoute = useCallback((routeId) => {
+    const { drawRoutes, clearAllRouteLayers } = useRouteVisualization(
+        map,
+        routes,
+        selectedRouteId,
+        handleRouteSelect
+    );
+
+    const zoomToRoute = useCallback((route) => {
+        if (!map || !route.rawPoints.length) return;
+
+        const bounds = route.rawPoints.reduce((bounds, coord) => {
+            return bounds.extend(coord);
+        }, new mapboxgl.LngLatBounds(route.rawPoints[0], route.rawPoints[0]));
+
+        map.fitBounds(bounds, {
+            padding: { top: 50, bottom: 50, left: 50, right: 400 },
+            duration: 1000
+        });
+    }, [map]);
+
+    const saveRouteToDatabase = useCallback(async (route) => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('User not authenticated');
+
+            const routeData = {
+                route_code: route.code || `ROUTE_${Date.now()}`,
+                origin_type: 'system',
+                proposed_by_user_id: user.id,
+                credited_by_operator_id: user.id, // ADD THIS LINE
+                status: route.status || 'draft',
+                geometry: {
+                    type: 'LineString',
+                    coordinates: route.rawPoints,
+                    properties: {
+                        color: '#0066CC',
+                        name: route.name || route.code
+                    }
+                },
+                stops_snapshot: route.snappedPoints ? {
+                    type: 'LineString',
+                    coordinates: route.snappedPoints
+                } : null,
+                length_meters: Math.round(estimateLength(route.rawPoints) * 1000),
+                last_geometry_update_at: new Date().toISOString(),
+                region_id: route.regionId || null,
+                updated_at: new Date().toISOString()
+            };
+
+            let result;
+
+            if (route.id && isValidUUID(route.id)) {
+                const { data, error } = await supabase
+                    .from('routes')
+                    .update(routeData)
+                    .eq('id', route.id)
+                    .select(`
+            *,
+            region:region_id (
+              region_id,
+              name,
+              code
+            )
+          `)
+                    .single();
+
+                if (error) throw error;
+                result = data;
+            } else {
+                const { data, error } = await supabase
+                    .from('routes')
+                    .insert([routeData])
+                    .select(`
+            *,
+            region:region_id (
+              region_id,
+              name,
+              code
+            )
+          `)
+                    .single();
+
+                if (error) throw error;
+                result = data;
+            }
+
+            // Update the local state immediately
+            const updatedRoute = {
+                id: result.id,
+                name: result.geometry?.properties?.name || result.route_code,
+                code: result.route_code,
+                color: '#0066CC',
+                rawPoints: result.geometry?.coordinates || [],
+                snappedPoints: result.stops_snapshot?.coordinates || null,
+                regionId: result.region_id,
+                regionName: result.region?.name,
+                status: result.status,
+                length_meters: result.length_meters,
+                created_at: result.created_at,
+                updated_at: result.updated_at
+            };
+
+            setRoutes(prev => {
+                const existingIndex = prev.findIndex(r => r.id === result.id);
+                if (existingIndex >= 0) {
+                    const newRoutes = [...prev];
+                    newRoutes[existingIndex] = updatedRoute;
+                    return newRoutes;
+                } else {
+                    return [updatedRoute, ...prev];
+                }
+            });
+
+            return result;
+        } catch (error) {
+            console.error('Error saving route:', error);
+            alert(`Failed to save route: ${error.message}`);
+            throw error;
+        }
+    }, []);
+
+    const deleteRouteFromDatabase = useCallback(async (routeId) => {
+        try {
+            const { error } = await supabase
+                .from('routes')
+                .update({
+                    deleted_at: new Date().toISOString(),
+                    status: 'deprecated'
+                })
+                .eq('id', routeId);
+
+            if (error) throw error;
+
+            // Remove from local state immediately
+            setRoutes(prev => prev.filter(r => r.id !== routeId));
+
+            // Clear selection
+            if (selectedRouteId === routeId) {
+                setSelectedRouteId(null);
+            }
+            if (activeRouteId === routeId) {
+                setActiveRouteId(null);
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error deleting route:', error);
+            alert('Failed to delete route');
+            return false;
+        }
+    }, [selectedRouteId, activeRouteId]);
+
+    const assignRegion = useCallback(async (routeId, regionId) => {
+        try {
+            const { error } = await supabase
+                .from('routes')
+                .update({ region_id: regionId || null })
+                .eq('id', routeId);
+
+            if (error) throw error;
+
+            setRoutes(prev =>
+                prev.map(r =>
+                    r.id === routeId ? {
+                        ...r,
+                        regionId: regionId || null,
+                        regionName: regionId ? getRegionName(regionId) : null
+                    } : r
+                )
+            );
+
+            if (selectedRoute?.id === routeId) {
+                setSelectedRouteId(routeId);
+            }
+        } catch (error) {
+            console.error('Error assigning region:', error);
+            alert('Failed to assign region');
+        }
+    }, [selectedRoute, getRegionName]);
+
+    const duplicateRoute = useCallback(async (routeId) => {
         const route = routes.find(r => r.id === routeId);
         if (!route) return;
 
-        const newRoute = {
-            ...route,
-            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: `${route.name} (Copy)`,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('User not authenticated');
 
-        setRoutes(prev => [newRoute, ...prev]);
-        setSelectedRouteId(newRoute.id);
-        setActiveRouteId(newRoute.id);
-    }, [routes]);
+            const newRouteCode = `${route.code}-COPY`;
 
-    const exportRoutes = useCallback(() => {
-        const dataStr = JSON.stringify(routes, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-        const exportFileDefaultName = `routes-${new Date().toISOString().split('T')[0]}.json`;
+            const { data: newRoute, error } = await supabase
+                .from('routes')
+                .insert([{
+                    route_code: newRouteCode,
+                    origin_type: 'field',
+                    proposed_by_user_id: user.id,
+                    credited_by_operator_id: user.id, // ADD THIS LINE
+                    status: 'draft',
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: route.rawPoints,
+                        properties: {
+                            color: '#0066CC',
+                            name: `${route.name} (Copy)`
+                        }
+                    },
+                    length_meters: route.length_meters,
+                    region_id: route.regionId
+                }])
+                .select(`
+        *,
+        region:region_id (
+          region_id,
+          name,
+          code
+        )
+      `)
+                .single();
 
-        const linkElement = document.createElement('a');
-        linkElement.setAttribute('href', dataUri);
-        linkElement.setAttribute('download', exportFileDefaultName);
-        linkElement.click();
-    }, [routes]);
+            if (error) throw error;
 
-    const importRoutes = useCallback((event) => {
-        const file = event.target.files[0];
-        if (!file) return;
+            const newEditorRoute = {
+                id: newRoute.id,
+                name: `${route.name} (Copy)`,
+                code: newRoute.route_code,
+                color: '#0066CC',
+                rawPoints: newRoute.geometry?.coordinates || [],
+                snappedPoints: newRoute.stops_snapshot?.coordinates || null,
+                regionId: newRoute.region_id,
+                regionName: newRoute.region?.name,
+                status: newRoute.status,
+                length_meters: newRoute.length_meters,
+                created_at: newRoute.created_at,
+                updated_at: newRoute.updated_at
+            };
 
-        if (file.size > 5 * 1024 * 1024) {
-            alert("File too large. Maximum size is 5MB.");
-            return;
+            setRoutes(prev => [newEditorRoute, ...prev]);
+            setSelectedRouteId(newRoute.id);
+            setActiveRouteId(newRoute.id);
+
+        } catch (error) {
+            console.error('Error duplicating route:', error);
+            alert('Failed to duplicate route');
         }
+    }, [routes]);
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const importedRoutes = JSON.parse(e.target.result);
-                if (Array.isArray(importedRoutes)) {
-                    const updatedRoutes = importedRoutes.map(route => ({
-                        ...route,
-                        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-                    }));
+    // Effects
+    useEffect(() => {
+        fetchRegions();
+    }, [fetchRegions]);
 
-                    setRoutes(prev => [...updatedRoutes, ...prev]);
-                    alert(`Successfully imported ${importedRoutes.length} routes.`);
-                } else {
-                    alert("Invalid file format. Expected an array of routes.");
-                }
-            } catch (error) {
-                console.error("Import error:", error);
-                alert("Failed to import routes. Invalid JSON format.");
-            }
+    useEffect(() => {
+        fetchRoutes();
+    }, [fetchRoutes]);
+
+    useEffect(() => {
+        if (map && mapLoaded) {
+            drawRoutes(filteredRoutes);
+        }
+    }, [filteredRoutes, map, mapLoaded, drawRoutes]);
+
+    useEffect(() => {
+        return () => {
+            clearAllRouteLayers();
         };
-        reader.readAsText(file);
-        event.target.value = '';
-    }, []);
+    }, [clearAllRouteLayers]);
+
+    function isValidUUID(uuid) {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return uuidRegex.test(uuid);
+    }
+
+    const isLoading = isLoadingRoutes || isLoadingRegions;
 
     return (
         <div style={styles.container}>
-            {/* Main Map */}
             <div ref={mapContainer} style={styles.map} />
 
-            {/* Sidebar Panel */}
             <div style={styles.sidebar}>
-                {!viewEditRoute ? (
-                    <>
-                        {/* Header */}
-                        <div style={styles.header}>
-                            <div>
-                                <div style={styles.title}>Route Manager</div>
-                                <div style={styles.subtitle}>
-                                    {routes.length} route{routes.length !== 1 ? 's' : ''}
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setViewEditRoute(true)}
-                                style={styles.primaryButton}
-                            >
-                                New Route
-                            </button>
-                        </div>
-
-                        {/* Data Management */}
-                        <div style={styles.section}>
-                            <div style={styles.sectionTitle}>Data Management</div>
-                            <div style={styles.dataButtons}>
-                                <button
-                                    onClick={exportRoutes}
-                                    style={styles.secondaryButton}
-                                >
-                                    Export Routes
-                                </button>
-                                <div style={styles.fileInputWrapper}>
-                                    <input
-                                        type="file"
-                                        accept=".json"
-                                        onChange={importRoutes}
-                                        style={styles.fileInput}
-                                        id="route-import"
-                                    />
-                                    <label htmlFor="route-import" style={styles.secondaryButton}>
-                                        Import Routes
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Region Filter */}
-                        <div style={styles.section}>
-                            <div style={styles.sectionTitle}>Filter by Region</div>
-                            <select
-                                value={selectedRegionFilter}
-                                onChange={e => setSelectedRegionFilter(e.target.value)}
-                                style={styles.select}
-                            >
-                                <option value="">All Regions</option>
-                                {regions.map(r => (
-                                    <option key={r.id} value={r.id}>{r.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Routes List */}
-                        <div style={styles.section}>
-                            <div style={styles.sectionHeader}>
-                                <div style={styles.sectionTitle}>
-                                    Routes ({routes.filter(r => !selectedRegionFilter || r.regionId === Number(selectedRegionFilter)).length})
-                                </div>
-                            </div>
-
-                            <div style={styles.routesList}>
-                                {routes
-                                    .filter(r => !selectedRegionFilter || r.regionId === Number(selectedRegionFilter))
-                                    .map(route => (
-                                        <div
-                                            key={route.id}
-                                            onClick={() => {
-                                                setSelectedRouteId(route.id);
-                                                setActiveRouteId(route.id);
-                                                if (map && (route.snappedPoints || route.rawPoints).length > 0) {
-                                                    const points = route.snappedPoints || route.rawPoints;
-                                                    const bounds = points.reduce((bounds, coord) => {
-                                                        return bounds.extend(coord);
-                                                    }, new mapboxgl.LngLatBounds(points[0], points[0]));
-                                                    map.fitBounds(bounds, { padding: 50, duration: 1000 });
-                                                }
-                                            }}
-                                            style={{
-                                                ...styles.routeItem,
-                                                borderLeft: `4px solid ${route.color}`,
-                                                background: selectedRouteId === route.id ? '#f1f5f9' : '#fff'
-                                            }}
-                                        >
-                                            <div style={styles.routeHeader}>
-                                                <div style={styles.routeName}>{route.name}</div>
-                                                <div style={styles.routeBadges}>
-                                                    {route.snappedPoints && (
-                                                        <span style={styles.badgeSnapped}>Snapped</span>
-                                                    )}
-                                                    {route.optimized && (
-                                                        <span style={styles.badgeOptimized}>Optimized</span>
-                                                    )}
-                                                    {route.regionId && (
-                                                        <span style={styles.badgeRegion}>
-                                                            {getRegionName(route.regionId).charAt(0)}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div style={styles.routeDetails}>
-                                                <div style={styles.routeDetail}>
-                                                    {estimateLength(route.snappedPoints || route.rawPoints)} km
-                                                </div>
-                                                <div style={styles.routeDetail}>
-                                                    {(route.snappedPoints || route.rawPoints).length} points
-                                                </div>
-                                            </div>
-
-                                            <div style={styles.routeActions}>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        duplicateRoute(route.id);
-                                                    }}
-                                                    style={styles.smallButton}
-                                                >
-                                                    Duplicate
-                                                </button>
-                                                <button
-                                                    onClick={() => setViewEditRoute(true)}
-                                                    style={styles.smallButton}
-                                                >
-                                                    Edit
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-
-                                {routes.length === 0 && (
-                                    <div style={styles.emptyState}>
-                                        <div style={styles.emptyTitle}>No routes yet</div>
-                                        <div style={styles.emptyText}>
-                                            Create your first route to get started
-                                        </div>
-                                        <button
-                                            onClick={() => setViewEditRoute(true)}
-                                            style={styles.emptyButton}
-                                        >
-                                            Create New Route
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Selected Route Details */}
-                        {selectedRoute && (
-                            <div style={styles.selectedRouteCard}>
-                                <div style={styles.selectedRouteHeader}>
-                                    <div style={styles.selectedRouteTitle}>{selectedRoute.name}</div>
-                                    <div style={styles.selectedRouteStatus}>
-                                        {selectedRoute.snappedPoints ? (
-                                            <span style={styles.statusSnapped}>Snapped to Road</span>
-                                        ) : (
-                                            <span style={styles.statusManual}>Manual Points</span>
-                                        )}
-                                        {selectedRoute.optimized && (
-                                            <span style={styles.statusOptimized}>Optimized</span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div style={styles.selectedRouteGrid}>
-                                    <div style={styles.selectedRouteStat}>
-                                        <div style={styles.selectedRouteStatValue}>
-                                            {estimateLength(selectedRoute.snappedPoints ?? selectedRoute.rawPoints)} km
-                                        </div>
-                                        <div style={styles.selectedRouteStatLabel}>Distance</div>
-                                    </div>
-                                    <div style={styles.selectedRouteStat}>
-                                        <div style={styles.selectedRouteStatValue}>
-                                            ~{Math.round((estimateLength(selectedRoute.snappedPoints ?? selectedRoute.rawPoints) / 30) * 60)} min
-                                        </div>
-                                        <div style={styles.selectedRouteStatLabel}>Estimated Time</div>
-                                    </div>
-                                    <div style={styles.selectedRouteStat}>
-                                        <div style={styles.selectedRouteStatValue}>
-                                            {(selectedRoute.snappedPoints ?? selectedRoute.rawPoints).length}
-                                        </div>
-                                        <div style={styles.selectedRouteStatLabel}>Points</div>
-                                    </div>
-                                </div>
-
-                                <div style={styles.regionSelector}>
-                                    <div style={styles.regionLabel}>Assign Region</div>
-                                    <select
-                                        value={selectedRoute.regionId || ""}
-                                        onChange={e => assignRegion(selectedRoute.id, e.target.value)}
-                                        style={styles.regionSelect}
-                                    >
-                                        <option value="">Select Region</option>
-                                        {regions.map(r => (
-                                            <option key={r.id} value={r.id}>{r.name}</option>
-                                        ))}
-                                    </select>
-                                    {selectedRoute.regionId && (
-                                        <div style={styles.currentRegion}>
-                                            Current: {getRegionName(selectedRoute.regionId)}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </>
-                ) : (
+                {viewEditRoute ? (
                     <RouteEditor
                         map={map}
                         routes={routes}
@@ -421,9 +924,99 @@ export function RouteManager({ operatorId }) {
                         setActiveRouteId={setActiveRouteId}
                         exitEditor={() => {
                             setViewEditRoute(false);
-                            setActiveRouteId(null);
+                            if (map && mapLoaded) {
+                                setTimeout(() => drawRoutes(filteredRoutes), 100);
+                            }
                         }}
+                        saveRouteToDatabase={saveRouteToDatabase}
+                        deleteRouteFromDatabase={deleteRouteFromDatabase}
+                        regions={regions}
                     />
+                ) : (
+                    <>
+                        <Header
+                            isLoading={isLoading}
+                            filteredRoutes={filteredRoutes}
+                            selectedRegionFilter={selectedRegionFilter}
+                            getRegionName={getRegionName}
+                            onNewRoute={() => {
+                                setViewEditRoute(true);
+                                setActiveRouteId(null);
+                            }}
+                        />
+
+                        <FilterSection
+                            regions={regions}
+                            selectedRegionFilter={selectedRegionFilter}
+                            onRegionChange={(value) => {
+                                setSelectedRegionFilter(value);
+                                setSelectedRouteId(null);
+                            }}
+                            searchQuery={searchQuery}
+                            onSearchChange={setSearchQuery}
+                            getRegionRouteCount={getRegionRouteCount}
+                        />
+
+                        <div style={styles.section}>
+                            <div style={styles.sectionHeader}>
+                                <div style={styles.sectionTitle}>
+                                    {selectedRegionFilter ? (
+                                        selectedRegionFilter === 'unassigned' ?
+                                            `Unassigned Routes` :
+                                            `${getRegionName(selectedRegionFilter)}`
+                                    ) : `All Routes`} ({filteredRoutes.length})
+                                </div>
+                            </div>
+
+                            <div style={styles.routesList}>
+                                {isLoading ? (
+                                    <RouteListSkeleton />
+                                ) : filteredRoutes.length === 0 ? (
+                                    <EmptyState
+                                        searchQuery={searchQuery}
+                                        selectedRegionFilter={selectedRegionFilter}
+                                        getRegionName={getRegionName}
+                                        onCreateNew={() => {
+                                            setViewEditRoute(true);
+                                            setActiveRouteId(null);
+                                        }}
+                                    />
+                                ) : (
+                                    filteredRoutes.map(route => (
+                                        <RouteItem
+                                            key={route.id}
+                                            route={route}
+                                            isSelected={selectedRouteId === route.id}
+                                            onClick={(route) => {
+                                                handleRouteSelect(route);
+                                                zoomToRoute(route);
+                                            }}
+                                            onEdit={(route) => {
+                                                setViewEditRoute(true);
+                                                setActiveRouteId(route.id);
+                                            }}
+                                            onDuplicate={duplicateRoute}
+                                            onDelete={(routeId) => {
+                                                if (window.confirm(`Delete "${route.name || route.code}"?`)) {
+                                                    deleteRouteFromDatabase(routeId);
+                                                }
+                                            }}
+                                        />
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        {selectedRoute && !isLoading && (
+                            <RouteDetailsCard
+                                route={selectedRoute}
+                                regions={regions}
+                                onEdit={() => setViewEditRoute(true)}
+                                onSave={saveRouteToDatabase}
+                                onAssignRegion={assignRegion}
+                            />
+                        )}
+                    </>
                 )}
             </div>
         </div>
@@ -433,328 +1026,370 @@ export function RouteManager({ operatorId }) {
 const styles = {
     container: {
         display: 'flex',
-        height: '100%',
+        height: '100vh',
         width: '100%',
-        fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        background: '#ffffff',
-        overflow: 'hidden'
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        background: '#F8FAFC'
     },
     map: {
         flex: 1,
         height: '100%',
-        minWidth: 0
+        minWidth: 0,
+        background: '#F1F5F9'
     },
     sidebar: {
-        width: '400px',
-        background: '#ffffff',
-        borderLeft: '1px solid #e5e7eb',
+        width: '420px',
+        background: '#FFFFFF',
+        borderLeft: '1px solid #E2E8F0',
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
-        zIndex: 10
+        overflow: 'hidden'
     },
     header: {
         padding: '20px',
-        borderBottom: '1px solid #e5e7eb',
-        background: '#ffffff',
+        borderBottom: '1px solid #E2E8F0',
+        background: '#FFFFFF',
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'flex-start'
+        alignItems: 'center',
+        flexShrink: 0
     },
     title: {
-        color: '#1f2937',
-        fontSize: '20px',
-        fontWeight: 700,
-        marginBottom: '4px',
-        letterSpacing: '-0.025em'
+        color: '#1E293B',
+        fontSize: '18px',
+        fontWeight: 600,
+        marginBottom: '2px'
     },
     subtitle: {
-        color: '#6b7280',
+        color: '#64748B',
         fontSize: '13px',
-        fontWeight: 500
+        fontWeight: 400
     },
-    primaryButton: {
-        background: '#1d4ed8',
-        color: '#ffffff',
-        border: 'none',
-        padding: '10px 20px',
+    filtersSection: {
+        padding: '16px 20px',
+        borderBottom: '1px solid #E2E8F0',
+        background: '#F8FAFC'
+    },
+    searchContainer: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
+    },
+    searchInput: {
+        width: '100%',
+        padding: '10px 14px',
+        border: '1px solid #CBD5E1',
         borderRadius: '6px',
         fontSize: '14px',
-        fontWeight: 600,
+        background: '#FFFFFF',
+        color: '#1E293B',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC',
+            boxShadow: '0 0 0 2px rgba(0, 102, 204, 0.1)'
+        }
+    },
+    primaryButton: {
+        background: '#0066CC',
+        color: '#FFFFFF',
+        border: 'none',
+        padding: '8px 16px',
+        borderRadius: '6px',
+        fontSize: '13px',
+        fontWeight: 500,
         cursor: 'pointer',
         whiteSpace: 'nowrap',
-        transition: 'background-color 0.2s',
-        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#0052A3'
+        }
+    },
+    secondaryButton: {
+        padding: '8px 16px',
+        background: '#FFFFFF',
+        border: '1px solid #CBD5E1',
+        borderRadius: '6px',
+        color: '#475569',
+        fontSize: '13px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        '&:hover': {
+            background: '#F1F5F9'
+        }
     },
     section: {
         padding: '20px',
-        background: '#ffffff',
-        borderBottom: '1px solid #e5e7eb'
+        borderBottom: '1px solid #E2E8F0',
+        background: '#FFFFFF'
     },
     sectionHeader: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '15px'
+        marginBottom: '16px'
     },
     sectionTitle: {
-        color: '#374151',
-        fontSize: '16px',
-        fontWeight: 600,
-        marginBottom: '15px',
-        letterSpacing: '-0.01em'
+        color: '#1E293B',
+        fontSize: '15px',
+        fontWeight: 600
     },
-    dataButtons: {
+    filterRow: {
         display: 'flex',
-        flexDirection: 'column',
-        gap: '10px'
-    },
-    secondaryButton: {
-        padding: '12px',
-        background: '#f9fafb',
-        border: '1px solid #d1d5db',
-        borderRadius: '6px',
-        color: '#4b5563',
-        fontSize: '14px',
-        fontWeight: 500,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'all 0.2s'
-    },
-    fileInputWrapper: {
-        position: 'relative',
-        width: '100%'
-    },
-    fileInput: {
-        position: 'absolute',
-        width: '100%',
-        height: '100%',
-        opacity: 0,
-        cursor: 'pointer'
+        gap: '8px',
+        alignItems: 'center'
     },
     select: {
-        width: '100%',
-        padding: '12px',
-        border: '1px solid #d1d5db',
+        flex: 1,
+        padding: '10px 14px',
+        border: '1px solid #CBD5E1',
         borderRadius: '6px',
         fontSize: '14px',
-        background: '#ffffff',
-        color: '#1f2937',
-        cursor: 'pointer'
+        background: '#FFFFFF',
+        color: '#1E293B',
+        cursor: 'pointer',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC'
+        }
+    },
+    clearFilterButton: {
+        padding: '10px 14px',
+        background: '#F1F5F9',
+        border: '1px solid #CBD5E1',
+        borderRadius: '6px',
+        color: '#475569',
+        fontSize: '13px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        '&:hover': {
+            background: '#E2E8F0'
+        }
+    },
+    loading: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '40px 20px',
+        color: '#64748B',
+        fontSize: '14px'
+    },
+    spinner: {
+        width: '24px',
+        height: '24px',
+        border: '2px solid #E2E8F0',
+        borderTopColor: '#0066CC',
+        borderRadius: '50%',
+        animation: 'spin 1s linear infinite',
+        marginBottom: '12px'
     },
     routesList: {
-        maxHeight: 'calc(100vh - 500px)',
+        flex: 1,
         overflowY: 'auto',
-        minHeight: '200px'
+        maxHeight: 'calc(100vh - 500px)',
+        minHeight: '150px',
+        paddingRight: '2px'
     },
     routeItem: {
         padding: '16px',
-        marginBottom: '10px',
-        background: '#ffffff',
-        borderRadius: '8px',
-        border: '1px solid #e5e7eb',
+        marginBottom: '8px',
+        background: '#FFFFFF',
+        borderRadius: '6px',
+        border: '1px solid #E2E8F0',
         cursor: 'pointer',
-        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#F8FAFC'
+        }
     },
     routeHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: '10px'
+        marginBottom: '8px',
+        gap: '8px'
     },
     routeName: {
-        fontWeight: 600,
-        color: '#1f2937',
-        fontSize: '15px',
-        flex: 1
+        fontWeight: 500,
+        color: '#1E293B',
+        fontSize: '14px'
+    },
+    routeSubtitle: {
+        fontSize: '12px',
+        color: '#64748B',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        marginTop: '2px'
+    },
+    snappedBadge: {
+        fontSize: '11px',
+        background: '#D1FAE5',
+        color: '#065F46',
+        padding: '2px 6px',
+        borderRadius: '4px',
+        fontWeight: 500
     },
     routeBadges: {
-        display: 'flex',
-        gap: '6px',
         flexShrink: 0
     },
-    badgeSnapped: {
+    badgeStatus: {
         fontSize: '11px',
-        background: '#059669',
-        color: '#ffffff',
         padding: '3px 8px',
-        borderRadius: '12px',
-        fontWeight: 500,
-        textTransform: 'uppercase'
-    },
-    badgeOptimized: {
-        fontSize: '11px',
-        background: '#7c3aed',
-        color: '#ffffff',
-        padding: '3px 8px',
-        borderRadius: '12px',
-        fontWeight: 500,
-        textTransform: 'uppercase'
-    },
-    badgeRegion: {
-        fontSize: '11px',
-        background: '#4b5563',
-        color: '#ffffff',
-        padding: '3px 8px',
-        borderRadius: '12px',
-        fontWeight: 500,
-        minWidth: '24px',
-        textAlign: 'center'
+        borderRadius: '4px',
+        fontWeight: 500
     },
     routeDetails: {
         display: 'flex',
-        gap: '15px',
+        gap: '16px',
         marginBottom: '12px',
-        fontSize: '13px',
-        color: '#6b7280'
+        fontSize: '12px',
+        color: '#64748B'
     },
     routeDetail: {
         display: 'flex',
-        alignItems: 'center'
+        alignItems: 'center',
+        gap: '4px'
+    },
+    detailIcon: {
+        fontWeight: 500
     },
     routeActions: {
         display: 'flex',
-        gap: '8px'
+        gap: '6px'
     },
     smallButton: {
-        flex: 1,
-        padding: '8px 12px',
+        padding: '6px 10px',
         background: 'transparent',
-        border: '1px solid #d1d5db',
-        borderRadius: '5px',
-        color: '#4b5563',
-        fontSize: '13px',
+        border: '1px solid #CBD5E1',
+        borderRadius: '4px',
+        color: '#475569',
+        fontSize: '12px',
+        fontWeight: 500,
         cursor: 'pointer',
-        transition: 'all 0.2s',
-        fontWeight: 500
+        transition: 'background 0.2s',
+        '&:hover': {
+            background: '#F1F5F9'
+        }
     },
     emptyState: {
         padding: '40px 20px',
         textAlign: 'center',
-        color: '#9ca3af'
+        color: '#64748B'
     },
     emptyTitle: {
-        fontSize: '16px',
-        fontWeight: 600,
-        marginBottom: '8px',
-        color: '#6b7280'
+        fontSize: '14px',
+        fontWeight: 500,
+        marginBottom: '4px',
+        color: '#475569'
     },
     emptyText: {
-        fontSize: '14px',
-        marginBottom: '20px'
+        fontSize: '13px',
+        marginBottom: '16px',
+        color: '#94A3B8'
     },
     emptyButton: {
-        background: '#1d4ed8',
-        color: '#ffffff',
+        background: '#0066CC',
+        color: '#FFFFFF',
         border: 'none',
-        padding: '12px 24px',
+        padding: '8px 16px',
         borderRadius: '6px',
-        fontSize: '14px',
-        fontWeight: 600,
+        fontSize: '13px',
+        fontWeight: 500,
         cursor: 'pointer',
-        transition: 'background-color 0.2s'
+        '&:hover': {
+            background: '#0052A3'
+        }
     },
     selectedRouteCard: {
         padding: '20px',
-        background: '#ffffff',
-        borderTop: '1px solid #e5e7eb',
+        background: '#F8FAFC',
+        borderTop: '1px solid #E2E8F0',
         marginTop: 'auto'
     },
     selectedRouteHeader: {
-        marginBottom: '15px'
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: '16px',
+        gap: '8px'
     },
     selectedRouteTitle: {
-        color: '#1f2937',
-        fontSize: '18px',
-        fontWeight: 700,
-        marginBottom: '8px',
-        letterSpacing: '-0.025em'
+        color: '#1E293B',
+        fontSize: '16px',
+        fontWeight: 600
     },
-    selectedRouteStatus: {
-        display: 'flex',
-        gap: '8px',
-        flexWrap: 'wrap'
+    selectedRouteSubtitle: {
+        fontSize: '13px',
+        color: '#64748B',
+        marginTop: '2px'
     },
-    statusSnapped: {
-        fontSize: '12px',
-        background: '#d1fae5',
-        color: '#065f46',
-        padding: '4px 10px',
-        borderRadius: '12px',
-        fontWeight: 500
-    },
-    statusManual: {
-        fontSize: '12px',
-        background: '#fef3c7',
-        color: '#92400e',
-        padding: '4px 10px',
-        borderRadius: '12px',
-        fontWeight: 500
-    },
-    statusOptimized: {
-        fontSize: '12px',
-        background: '#ede9fe',
-        color: '#5b21b6',
-        padding: '4px 10px',
-        borderRadius: '12px',
+    selectedStatusBadge: {
+        fontSize: '11px',
+        padding: '4px 8px',
+        borderRadius: '4px',
         fontWeight: 500
     },
     selectedRouteGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '15px',
-        marginBottom: '20px'
+        gap: '12px',
+        marginBottom: '16px'
     },
     selectedRouteStat: {
-        textAlign: 'center',
         padding: '12px',
-        background: '#f9fafb',
+        background: '#FFFFFF',
         borderRadius: '6px',
-        border: '1px solid #e5e7eb'
+        border: '1px solid #E2E8F0'
     },
-    selectedRouteStatValue: {
-        fontSize: '16px',
-        fontWeight: 700,
-        color: '#1f2937',
-        marginBottom: '4px'
+    selectedRouteStatContent: {
+        display: 'flex',
+        flexDirection: 'column'
     },
     selectedRouteStatLabel: {
         fontSize: '11px',
-        color: '#6b7280',
+        color: '#64748B',
         textTransform: 'uppercase',
-        letterSpacing: '0.05em'
+        letterSpacing: '0.05em',
+        marginBottom: '2px'
+    },
+    selectedRouteStatValue: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: '#1E293B'
     },
     regionSelector: {
-        marginTop: '15px'
+        marginBottom: '16px'
     },
     regionLabel: {
-        color: '#4b5563',
-        fontSize: '14px',
+        color: '#475569',
+        fontSize: '13px',
         fontWeight: 500,
-        marginBottom: '8px'
+        marginBottom: '6px'
     },
     regionSelect: {
         width: '100%',
-        padding: '12px',
-        border: '1px solid #d1d5db',
+        padding: '10px 14px',
+        border: '1px solid #CBD5E1',
         borderRadius: '6px',
         fontSize: '14px',
-        background: '#ffffff',
-        color: '#1f2937',
-        marginBottom: '10px',
-        cursor: 'pointer'
-    },
-    currentRegion: {
-        fontSize: '14px',
-        color: '#6b7280',
-        padding: '8px',
-        background: '#f9fafb',
-        borderRadius: '4px',
-        textAlign: 'center',
-        border: '1px solid #e5e7eb'
+        background: '#FFFFFF',
+        color: '#1E293B',
+        cursor: 'pointer',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC'
+        }
     }
 };
+
+if (typeof document !== 'undefined') {
+    const styleSheet = document.styleSheets[0];
+    if (styleSheet) {
+        styleSheet.insertRule(`
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    `, styleSheet.cssRules.length);
+    }
+}
