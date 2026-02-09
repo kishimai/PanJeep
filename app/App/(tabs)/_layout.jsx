@@ -7,10 +7,10 @@ import { ActivityIndicator, View, Text } from 'react-native';
 export default function TabsLayout() {
     const { session, isLoading } = useAuth();
 
-    // Only fetch profile if there's a logged-in session
-    const { profile, loading: profileLoading } = session ? useProfile(session) : { profile: null, loading: false };
+    // Fetch profile only when session exists
+    const { profile, loading: profileLoading } = useProfile(session);
 
-    // Show loading only when checking initial auth
+    // Show loading only while auth state is resolving
     if (isLoading) {
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -20,23 +20,25 @@ export default function TabsLayout() {
         );
     }
 
-    // Determine if user is an operator (only for logged-in users)
-    const isOperator = profile?.role === "operator";
+    // Determine role safely
+    const isOperator = !!session && profile?.role === "operator";
 
     return (
-        <Tabs screenOptions={{
-            headerShown: false,
-            tabBarActiveTintColor: '#4A90E2',
-            tabBarInactiveTintColor: '#666',
-            tabBarStyle: {
-                backgroundColor: '#FFF',
-                borderTopColor: '#E2E8F0',
-                height: 60,
-                paddingBottom: 8,
-                paddingTop: 8,
-            }
-        }}>
-            {/* Operator tabs - only shown for authenticated operators */}
+        <Tabs
+            screenOptions={{
+                headerShown: false,
+                tabBarActiveTintColor: '#4A90E2',
+                tabBarInactiveTintColor: '#666',
+                tabBarStyle: {
+                    backgroundColor: '#FFF',
+                    borderTopColor: '#E2E8F0',
+                    height: 60,
+                    paddingBottom: 8,
+                    paddingTop: 8,
+                },
+            }}
+        >
+            {/* Operator tabs */}
             <Tabs.Screen
                 name="home.operator"
                 options={{
@@ -68,7 +70,7 @@ export default function TabsLayout() {
                 }}
             />
 
-            {/* Passenger tabs - shown for guests AND logged-in passengers */}
+            {/* Passenger tabs (guests + passengers) */}
             <Tabs.Screen
                 name="home.passenger"
                 options={{

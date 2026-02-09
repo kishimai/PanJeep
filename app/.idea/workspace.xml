@@ -5,26 +5,17 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="54f70619-1484-4ec8-bcea-9b5e10d4fc19" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/App/UserEnter.jsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/App/login.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/deviceId.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/supabase.ts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/lib/useProfile.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/providers/AuthProvider.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/App/(tabs)/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/_layout.jsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/_layout.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/index.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/index.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/login.jsx" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.json" beforeDir="false" afterPath="$PROJECT_DIR$/app.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/supabase.jsx" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/useProfile.jsx" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/useSession.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/UserEnter.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/UserEnter.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/login.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/login.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/register.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/register.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/useProfile.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/lib/useProfile.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../web/src/RouteManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/../web/src/RouteManager.jsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -105,6 +96,8 @@
       <workItem from="1770358240458" duration="13000" />
       <workItem from="1770542122272" duration="6723000" />
       <workItem from="1770556117359" duration="15555000" />
+      <workItem from="1770612501280" duration="7839000" />
+      <workItem from="1770647393221" duration="17306000" />
     </task>
     <servers />
   </component>

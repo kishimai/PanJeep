@@ -7,17 +7,32 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
-    ScrollView,
     Animated,
+    Easing, // ADD THIS IMPORT
     Dimensions,
     StyleSheet,
-    ActivityIndicator,
+    Keyboard,
+    TouchableWithoutFeedback,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import { router } from "expo-router";
-import { Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
+
+// Elegant blue color palette
+const COLORS = {
+    background: "#39A0ED", // Blue background matching login
+    surface: "#FFFFFF",
+    text: "#1E293B",
+    textLight: "#FFFFFF",
+    textMuted: "#64748B",
+    primary: "#39A0ED", // Consistent blue for primary elements
+    accent: "#F87171",
+    border: "#E2E8F0",
+    success: "#10B981",
+    subtleBlue: "#EFF6FF", // Very light blue for inputs
+};
 
 export default function Register() {
     const [email, setEmail] = useState("");
@@ -29,39 +44,36 @@ export default function Register() {
         password: "",
         confirmPassword: "",
     });
-    const [isFocused, setIsFocused] = useState({
-        email: false,
-        password: false,
-        confirmPassword: false,
-    });
+
+    const [emailFocused, setEmailFocused] = useState(false);
+    const [passwordFocused, setPasswordFocused] = useState(false);
+    const [confirmPasswordFocused, setConfirmPasswordFocused] = useState(false);
+    const [acceptTerms, setAcceptTerms] = useState(false);
+
     const [passwordVisible, setPasswordVisible] = useState(false);
     const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
     const [passwordStrength, setPasswordStrength] = useState(0);
-    const [requirements, setRequirements] = useState({
-        length: false,
-        uppercase: false,
-        number: false,
-        match: false,
-    });
 
-    // Password: min 6 chars, 1 uppercase, 1 number
     const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{6,}$/;
 
-    // Animations
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideAnim = useRef(new Animated.Value(50)).current;
-    const checkmarkScale = useRef(new Animated.Value(0)).current;
+    // Elegant animations
+    const formSlide = useRef(new Animated.Value(height * 0.1)).current;
+    const formOpacity = useRef(new Animated.Value(0)).current;
+    const buttonScale = useRef(new Animated.Value(1)).current;
 
     useEffect(() => {
+        // Smooth entrance animation
         Animated.parallel([
-            Animated.timing(fadeAnim, {
+            Animated.timing(formOpacity, {
                 toValue: 1,
-                duration: 800,
+                duration: 500,
+                easing: Easing.out(Easing.cubic), // Fixed line
                 useNativeDriver: true,
             }),
-            Animated.timing(slideAnim, {
+            Animated.spring(formSlide, {
                 toValue: 0,
-                duration: 600,
+                tension: 100,
+                friction: 15,
                 useNativeDriver: true,
             }),
         ]).start();
@@ -69,112 +81,104 @@ export default function Register() {
 
     // Password strength calculation
     useEffect(() => {
-        const newRequirements = {
-            length: password.length >= 6,
-            uppercase: /[A-Z]/.test(password),
-            number: /\d/.test(password),
-            match: password === confirmPassword && password.length > 0,
-        };
-        setRequirements(newRequirements);
+        const length = password.length >= 6;
+        const uppercase = /[A-Z]/.test(password);
+        const number = /\d/.test(password);
+        const match = password === confirmPassword && password.length > 0;
 
-        // Calculate strength (0-4)
-        const strength = Object.values(newRequirements).filter(Boolean).length;
+        const strength = [length, uppercase, number, match].filter(Boolean).length;
         setPasswordStrength(strength);
     }, [password, confirmPassword]);
 
-    // Validate form
-    const validateForm = () => {
-        const errors = { email: "", password: "", confirmPassword: "" };
-        let isValid = true;
+    const validateAndSignUp = async () => {
+        if (!acceptTerms) {
+            Alert.alert("Accept Terms", "Please accept the terms to continue.");
+            return;
+        }
 
-        // Email validation
+        const errors = { email: "", password: "", confirmPassword: "" };
+        let hasError = false;
+
         if (!email.trim()) {
             errors.email = "Email is required";
-            isValid = false;
+            hasError = true;
         } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            errors.email = "Please enter a valid email";
-            isValid = false;
+            errors.email = "Enter a valid email";
+            hasError = true;
         }
 
-        // Password validation
         if (!password) {
             errors.password = "Password is required";
-            isValid = false;
+            hasError = true;
         } else if (!passwordRegex.test(password)) {
-            errors.password = "Password doesn't meet requirements";
-            isValid = false;
+            errors.password = "Check password requirements";
+            hasError = true;
         }
 
-        // Confirm password validation
         if (!confirmPassword) {
-            errors.confirmPassword = "Please confirm your password";
-            isValid = false;
+            errors.confirmPassword = "Confirm your password";
+            hasError = true;
         } else if (password !== confirmPassword) {
             errors.confirmPassword = "Passwords don't match";
-            isValid = false;
+            hasError = true;
         }
 
         setFormErrors(errors);
-        return isValid;
+        if (hasError) return;
+
+        // Elegant button press animation
+        Animated.sequence([
+            Animated.spring(buttonScale, {
+                toValue: 0.97,
+                tension: 180,
+                friction: 6,
+                useNativeDriver: true,
+            }),
+            Animated.spring(buttonScale, {
+                toValue: 1,
+                tension: 180,
+                friction: 6,
+                useNativeDriver: true,
+            }),
+        ]).start();
+
+        await signUp();
     };
 
     const getPasswordStrengthColor = () => {
         switch (passwordStrength) {
-            case 0:
-                return "#FF6B6B";
-            case 1:
-                return "#FFA726";
-            case 2:
-                return "#FFD166";
-            case 3:
-                return "#4ECDC4";
-            case 4:
-                return "#4CAF50";
-            default:
-                return "#FF6B6B";
+            case 0: return "#FCA5A5";
+            case 1: return "#FDBA74";
+            case 2: return "#FCD34D";
+            case 3: return "#86EFAC";
+            case 4: return COLORS.success;
+            default: return COLORS.accent;
         }
     };
 
-    const getPasswordStrengthText = () => {
-        switch (passwordStrength) {
-            case 0:
-                return "Very Weak";
-            case 1:
-                return "Weak";
-            case 2:
-                return "Fair";
-            case 3:
-                return "Good";
-            case 4:
-                return "Strong";
-            default:
-                return "";
-        }
+    // Show password help in an elegant alert
+    const showPasswordRequirements = () => {
+        Alert.alert(
+            "Password Requirements",
+            "For your security, please create a password with:\n\n• At least 6 characters\n• One uppercase letter (A-Z)\n• One number (0-9)\n• Both passwords must match",
+            [{ text: "Understood", style: "default" }]
+        );
     };
 
     async function signUp() {
-        if (!validateForm()) return;
-
         setLoading(true);
-
         try {
-            // 1️⃣ Create auth user
             const { data, error } = await supabase.auth.signUp({
                 email: email.trim(),
                 password,
-                options: {
-                    data: {
-                        role: "passenger",
-                    },
-                },
+                options: { data: { role: "passenger" } },
             });
 
             if (error) {
-                // Handle specific error cases
                 if (error.message.includes("already registered")) {
                     Alert.alert(
                         "Account Exists",
-                        "This email is already registered. Please sign in instead.",
+                        "This email is already registered.\n\nWould you like to sign in instead?",
                         [
                             { text: "Cancel", style: "cancel" },
                             { text: "Sign In", onPress: () => router.replace("/login") },
@@ -186,811 +190,505 @@ export default function Register() {
                 throw new Error(error.message);
             }
 
-            const user = data.user;
-            if (!user) {
-                // Email confirmation required - Success animation
-                Animated.spring(checkmarkScale, {
-                    toValue: 1,
-                    tension: 150,
-                    friction: 3,
-                    useNativeDriver: true,
-                }).start();
-
-                setTimeout(() => {
-                    Alert.alert(
-                        "Check Your Email",
-                        "Registration successful! Please check your email to confirm your account before logging in.",
-                        [
-                            {
-                                text: "Go to Login",
-                                onPress: () => router.replace("/login"),
-                            },
-                        ]
-                    );
-                }, 500);
-                return;
-            }
-
-            //inserting directly without edge function
+            // Create user profile
             const { error: profileError } = await supabase
                 .from("users")
                 .insert({
-                    id: user.id,
-                    email: user.email,
+                    id: data.user?.id,
+                    email: data.user?.email,
                     role: "passenger",
                     created_at: new Date().toISOString(),
                 })
                 .select();
 
             if (profileError) {
-                console.error("Profile insertion error:", profileError);
-                if (profileError.code === '23505') {
-                    Alert.alert(
-                        "Profile Already Exists",
-                        "Your account was created, but profile already exists.",
-                        [
-                            {
-                                text: "Continue to Login",
-                                onPress: () => router.replace("/login"),
-                            },
-                        ]
-                    );
-                } else if (profileError.message.includes("row-level security")) {
-                    Alert.alert(
-                        "Permission Issue",
-                        "Your account was created, but couldn't create profile due to security settings.",
-                        [
-                            {
-                                text: "Contact Support",
-                                onPress: () => router.replace("/login"),
-                            },
-                            {
-                                text: "Try Login",
-                                style: "default",
-                                onPress: () => router.replace("/login"),
-                            },
-                        ]
-                    );
-                } else {
-                    Alert.alert(
-                        "Partial Success",
-                        "Account created but profile setup incomplete. You can still sign in and contact support.",
-                        [
-                            {
-                                text: "Continue to Login",
-                                onPress: () => router.replace("/login"),
-                            },
-                        ]
-                    );
-                }
+                console.error("Profile error:", profileError);
+                Alert.alert(
+                    "Almost Complete",
+                    "Your account has been created.\n\nYou can now sign in to continue.",
+                    [{ text: "Sign In", onPress: () => router.replace("/login") }]
+                );
                 setLoading(false);
                 return;
             }
 
-            const {
-                data: { user: currentUser },
-            } = await supabase.auth.getUser();
-
-            if (currentUser && currentUser.email_confirmed_at) {
-                // User email is already confirmed - auto login
-                const { error: loginError } = await supabase.auth.signInWithPassword({
-                    email,
-                    password,
-                });
-
-                if (loginError) {
-                    Alert.alert(
-                        "Success",
-                        "Account created! Please log in manually.",
-                        [
-                            {
-                                text: "OK",
-                                onPress: () => router.replace("/login"),
-                            },
-                        ]
-                    );
-                } else {
-                    // Success animation
-                    Animated.spring(checkmarkScale, {
-                        toValue: 1,
-                        tension: 150,
-                        friction: 3,
-                        useNativeDriver: true,
-                    }).start();
-
-                    setTimeout(() => {
-                        router.replace("/(tabs)");
-                    }, 800);
-                }
-            } else {
-                Animated.spring(checkmarkScale, {
-                    toValue: 1,
-                    tension: 150,
-                    friction: 3,
-                    useNativeDriver: true,
-                }).start();
-
-                setTimeout(() => {
-                    Alert.alert(
-                        "Check Your Email",
-                        "Registration successful! Please check your email to confirm your account before logging in.",
-                        [
-                            {
-                                text: "Go to Login",
-                                onPress: () => router.replace("/login"),
-                            },
-                        ]
-                    );
-                }, 500);
-            }
+            Alert.alert(
+                "Check Your Email",
+                "Registration successful!\n\nPlease check your email to confirm your account before signing in.",
+                [{ text: "Got it", onPress: () => router.replace("/login") }]
+            );
         } catch (err) {
             console.error("Register error:", err);
             Alert.alert(
                 "Registration Failed",
-                err.message || "An error occurred during registration. Please try again."
+                err.message || "Please check your information and try again."
             );
         } finally {
             setLoading(false);
         }
     }
 
+    const dismissKeyboard = () => Keyboard.dismiss();
+
     return (
-        <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={styles.container}
-        >
-            <ScrollView
-                contentContainerStyle={styles.scrollContainer}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-            >
-                <Animated.View
-                    style={[
-                        styles.content,
-                        {
-                            opacity: fadeAnim,
-                            transform: [{ translateY: slideAnim }],
-                        },
-                    ]}
+        <TouchableWithoutFeedback onPress={dismissKeyboard}>
+            <View style={styles.container}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === "ios" ? "padding" : "height"}
+                    style={styles.keyboardAvoid}
+                    keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
                 >
-                    {/* Success Checkmark (Hidden by default) */}
+                    {/* Elegant Header with Blue Background */}
+                    <View style={styles.header}>
+                        <View style={styles.titleContainer}>
+                            <Text style={styles.title}>Join Lakbay</Text>
+                            <Text style={styles.subtitle}>Begin your journey with us</Text>
+                        </View>
+                    </View>
+
+                    {/* Elegant White Form Card */}
                     <Animated.View
                         style={[
-                            styles.successOverlay,
+                            styles.formCard,
                             {
-                                opacity: checkmarkScale,
-                                transform: [{ scale: checkmarkScale }],
+                                opacity: formOpacity,
+                                transform: [{ translateY: formSlide }],
                             },
                         ]}
                     >
-                        <View style={styles.successContainer}>
-                            <Feather name="check-circle" size={80} color="#4CAF50" />
-                            <Text style={styles.successText}>Account Created!</Text>
-                            <Text style={styles.successSubtext}>Redirecting...</Text>
-                        </View>
-                    </Animated.View>
-
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <TouchableOpacity
-                            style={styles.backButton}
-                            onPress={() => router.back()}
-                            disabled={loading}
-                        >
-                            <Feather name="arrow-left" size={24} color="#4A90E2" />
-                        </TouchableOpacity>
-                        <View style={styles.logoContainer}>
-                            <Feather name="user-plus" size={50} color="#4A90E2" />
-                        </View>
-                        <Text style={styles.title}>Create Account</Text>
-                        <Text style={styles.subtitle}>Join us and start your journey</Text>
-                    </View>
-
-                    {/* Form */}
-                    <View style={styles.formContainer}>
-                        {/* Email Input */}
-                        <View style={styles.inputContainer}>
-                            <View style={styles.inputLabelContainer}>
-                                <Feather
-                                    name="mail"
-                                    size={16}
-                                    color={isFocused.email ? "#4A90E2" : "#666"}
-                                    style={styles.inputIcon}
-                                />
-                                <Text
-                                    style={[
-                                        styles.inputLabel,
-                                        isFocused.email && styles.inputLabelFocused,
-                                    ]}
-                                >
-                                    Email Address
-                                </Text>
+                        {/* Email Field */}
+                        <View style={styles.field}>
+                            <View style={styles.fieldLabelRow}>
+                                <Text style={styles.fieldLabel}>Email Address</Text>
+                                <Feather name="mail" size={16} color={COLORS.textMuted} />
                             </View>
-                            <TextInput
-                                placeholder="your@email.com"
-                                placeholderTextColor="#999"
-                                autoCapitalize="none"
-                                autoComplete="email"
-                                keyboardType="email-address"
-                                value={email}
-                                onChangeText={(text) => {
-                                    setEmail(text);
-                                    if (formErrors.email)
-                                        setFormErrors({ ...formErrors, email: "" });
-                                }}
-                                onFocus={() => setIsFocused({ ...isFocused, email: true })}
-                                onBlur={() => setIsFocused({ ...isFocused, email: false })}
-                                style={[
-                                    styles.input,
-                                    isFocused.email && styles.inputFocused,
-                                    formErrors.email && styles.inputError,
-                                ]}
-                                editable={!loading}
-                            />
+                            <View style={[
+                                styles.inputContainer,
+                                emailFocused && styles.inputFocused,
+                                formErrors.email && styles.inputError,
+                            ]}>
+                                <TextInput
+                                    placeholder="you@example.com"
+                                    placeholderTextColor={COLORS.textMuted}
+                                    autoCapitalize="none"
+                                    keyboardType="email-address"
+                                    value={email}
+                                    onChangeText={(text) => {
+                                        setEmail(text);
+                                        if (formErrors.email) setFormErrors({ ...formErrors, email: "" });
+                                    }}
+                                    onFocus={() => setEmailFocused(true)}
+                                    onBlur={() => setEmailFocused(false)}
+                                    style={styles.input}
+                                    editable={!loading}
+                                />
+                            </View>
                             {formErrors.email ? (
-                                <Text style={styles.errorText}>{formErrors.email}</Text>
+                                <View style={styles.errorContainer}>
+                                    <Feather name="alert-circle" size={14} color={COLORS.accent} />
+                                    <Text style={styles.errorText}>{formErrors.email}</Text>
+                                </View>
                             ) : null}
                         </View>
 
-                        {/* Password Input */}
-                        <View style={styles.inputContainer}>
-                            <View style={styles.inputLabelContainer}>
-                                <Feather
-                                    name="lock"
-                                    size={16}
-                                    color={isFocused.password ? "#4A90E2" : "#666"}
-                                    style={styles.inputIcon}
-                                />
-                                <Text
-                                    style={[
-                                        styles.inputLabel,
-                                        isFocused.password && styles.inputLabelFocused,
-                                    ]}
-                                >
-                                    Password
-                                </Text>
+                        {/* Password Field with Elegant Help Button */}
+                        <View style={styles.field}>
+                            <View style={styles.fieldLabelRow}>
+                                <View style={styles.labelWithHelp}>
+                                    <Text style={styles.fieldLabel}>Password</Text>
+                                    <TouchableOpacity
+                                        onPress={showPasswordRequirements}
+                                        style={styles.helpIcon}
+                                        disabled={loading}
+                                    >
+                                        <Feather name="help-circle" size={16} color={COLORS.primary} />
+                                    </TouchableOpacity>
+                                </View>
                             </View>
-                            <View style={styles.passwordContainer}>
+                            <View style={[
+                                styles.inputContainer,
+                                passwordFocused && styles.inputFocused,
+                                formErrors.password && styles.inputError,
+                            ]}>
                                 <TextInput
-                                    placeholder="Create a strong password"
-                                    placeholderTextColor="#999"
+                                    placeholder="Create a secure password"
+                                    placeholderTextColor={COLORS.textMuted}
                                     secureTextEntry={!passwordVisible}
                                     value={password}
                                     onChangeText={(text) => {
                                         setPassword(text);
-                                        if (formErrors.password)
-                                            setFormErrors({ ...formErrors, password: "" });
+                                        if (formErrors.password) setFormErrors({ ...formErrors, password: "" });
                                     }}
-                                    onFocus={() => setIsFocused({ ...isFocused, password: true })}
-                                    onBlur={() => setIsFocused({ ...isFocused, password: false })}
-                                    style={[
-                                        styles.input,
-                                        styles.passwordInput,
-                                        isFocused.password && styles.inputFocused,
-                                        formErrors.password && styles.inputError,
-                                    ]}
+                                    onFocus={() => setPasswordFocused(true)}
+                                    onBlur={() => setPasswordFocused(false)}
+                                    style={[styles.input, styles.passwordInput]}
                                     editable={!loading}
                                 />
                                 <TouchableOpacity
                                     onPress={() => setPasswordVisible(!passwordVisible)}
-                                    style={styles.visibilityToggle}
+                                    style={styles.eyeButton}
                                     disabled={loading}
                                 >
                                     <Feather
                                         name={passwordVisible ? "eye-off" : "eye"}
-                                        size={20}
-                                        color="#666"
+                                        size={18}
+                                        color={passwordFocused ? COLORS.primary : COLORS.textMuted}
                                     />
                                 </TouchableOpacity>
                             </View>
+                            {formErrors.password ? (
+                                <View style={styles.errorContainer}>
+                                    <Feather name="alert-circle" size={14} color={COLORS.accent} />
+                                    <Text style={styles.errorText}>{formErrors.password}</Text>
+                                </View>
+                            ) : null}
 
-                            {/* Password Strength Indicator */}
+                            {/* Elegant Strength Indicator */}
                             {password.length > 0 && (
                                 <View style={styles.strengthContainer}>
                                     <View style={styles.strengthBar}>
-                                        {[1, 2, 3, 4].map((index) => (
-                                            <View
-                                                key={index}
-                                                style={[
-                                                    styles.strengthSegment,
-                                                    {
-                                                        backgroundColor:
-                                                            index <= passwordStrength
-                                                                ? getPasswordStrengthColor()
-                                                                : "#E2E8F0",
-                                                    },
-                                                ]}
-                                            />
-                                        ))}
+                                        <View style={[
+                                            styles.strengthFill,
+                                            {
+                                                width: `${passwordStrength * 25}%`,
+                                                backgroundColor: getPasswordStrengthColor(),
+                                            }
+                                        ]} />
                                     </View>
-                                    <Text
-                                        style={[
-                                            styles.strengthText,
-                                            { color: getPasswordStrengthColor() },
-                                        ]}
-                                    >
-                                        {getPasswordStrengthText()}
+                                    <Text style={[
+                                        styles.strengthText,
+                                        { color: getPasswordStrengthColor() }
+                                    ]}>
+                                        {passwordStrength === 4 ? "Strong" :
+                                            passwordStrength >= 2 ? "Good" :
+                                                "Needs improvement"}
                                     </Text>
                                 </View>
                             )}
-
-                            {/* Password Requirements */}
-                            <View style={styles.requirementsContainer}>
-                                <Text style={styles.requirementsTitle}>
-                                    Password must include:
-                                </Text>
-                                <View style={styles.requirementItem}>
-                                    <Feather
-                                        name={requirements.length ? "check-circle" : "circle"}
-                                        size={14}
-                                        color={requirements.length ? "#4CAF50" : "#666"}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.requirementText,
-                                            requirements.length && styles.requirementMet,
-                                        ]}
-                                    >
-                                        At least 6 characters
-                                    </Text>
-                                </View>
-                                <View style={styles.requirementItem}>
-                                    <Feather
-                                        name={requirements.uppercase ? "check-circle" : "circle"}
-                                        size={14}
-                                        color={requirements.uppercase ? "#4CAF50" : "#666"}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.requirementText,
-                                            requirements.uppercase && styles.requirementMet,
-                                        ]}
-                                    >
-                                        One uppercase letter
-                                    </Text>
-                                </View>
-                                <View style={styles.requirementItem}>
-                                    <Feather
-                                        name={requirements.number ? "check-circle" : "circle"}
-                                        size={14}
-                                        color={requirements.number ? "#4CAF50" : "#666"}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.requirementText,
-                                            requirements.number && styles.requirementMet,
-                                        ]}
-                                    >
-                                        One number
-                                    </Text>
-                                </View>
-                            </View>
                         </View>
 
-                        {/* Confirm Password Input */}
-                        <View style={styles.inputContainer}>
-                            <View style={styles.inputLabelContainer}>
-                                <Feather
-                                    name="lock"
-                                    size={16}
-                                    color={isFocused.confirmPassword ? "#4A90E2" : "#666"}
-                                    style={styles.inputIcon}
-                                />
-                                <Text
-                                    style={[
-                                        styles.inputLabel,
-                                        isFocused.confirmPassword && styles.inputLabelFocused,
-                                    ]}
-                                >
-                                    Confirm Password
-                                </Text>
+                        {/* Confirm Password Field */}
+                        <View style={styles.field}>
+                            <View style={styles.fieldLabelRow}>
+                                <Text style={styles.fieldLabel}>Confirm Password</Text>
+                                <Feather name="shield" size={16} color={COLORS.textMuted} />
                             </View>
-                            <View style={styles.passwordContainer}>
+                            <View style={[
+                                styles.inputContainer,
+                                confirmPasswordFocused && styles.inputFocused,
+                                formErrors.confirmPassword && styles.inputError,
+                            ]}>
                                 <TextInput
                                     placeholder="Re-enter your password"
-                                    placeholderTextColor="#999"
+                                    placeholderTextColor={COLORS.textMuted}
                                     secureTextEntry={!confirmPasswordVisible}
                                     value={confirmPassword}
                                     onChangeText={(text) => {
                                         setConfirmPassword(text);
-                                        if (formErrors.confirmPassword)
-                                            setFormErrors({ ...formErrors, confirmPassword: "" });
+                                        if (formErrors.confirmPassword) setFormErrors({ ...formErrors, confirmPassword: "" });
                                     }}
-                                    onFocus={() =>
-                                        setIsFocused({ ...isFocused, confirmPassword: true })
-                                    }
-                                    onBlur={() =>
-                                        setIsFocused({ ...isFocused, confirmPassword: false })
-                                    }
-                                    style={[
-                                        styles.input,
-                                        styles.passwordInput,
-                                        isFocused.confirmPassword && styles.inputFocused,
-                                        formErrors.confirmPassword && styles.inputError,
-                                    ]}
+                                    onFocus={() => setConfirmPasswordFocused(true)}
+                                    onBlur={() => setConfirmPasswordFocused(false)}
+                                    style={[styles.input, styles.passwordInput]}
                                     editable={!loading}
                                 />
                                 <TouchableOpacity
-                                    onPress={() =>
-                                        setConfirmPasswordVisible(!confirmPasswordVisible)
-                                    }
-                                    style={styles.visibilityToggle}
+                                    onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
+                                    style={styles.eyeButton}
                                     disabled={loading}
                                 >
                                     <Feather
                                         name={confirmPasswordVisible ? "eye-off" : "eye"}
-                                        size={20}
-                                        color="#666"
+                                        size={18}
+                                        color={confirmPasswordFocused ? COLORS.primary : COLORS.textMuted}
                                     />
                                 </TouchableOpacity>
                             </View>
                             {formErrors.confirmPassword ? (
-                                <Text style={styles.errorText}>{formErrors.confirmPassword}</Text>
+                                <View style={styles.errorContainer}>
+                                    <Feather name="alert-circle" size={14} color={COLORS.accent} />
+                                    <Text style={styles.errorText}>{formErrors.confirmPassword}</Text>
+                                </View>
                             ) : null}
 
-                            {/* Password Match Indicator */}
+                            {/* Elegant Match Indicator */}
                             {password.length > 0 && confirmPassword.length > 0 && (
                                 <View style={styles.matchContainer}>
                                     <Feather
-                                        name={requirements.match ? "check" : "x"}
+                                        name={password === confirmPassword ? "check-circle" : "x-circle"}
                                         size={16}
-                                        color={requirements.match ? "#4CAF50" : "#FF6B6B"}
+                                        color={password === confirmPassword ? COLORS.success : COLORS.accent}
                                     />
-                                    <Text
-                                        style={[
-                                            styles.matchText,
-                                            { color: requirements.match ? "#4CAF50" : "#FF6B6B" },
-                                        ]}
-                                    >
-                                        {requirements.match ? "Passwords match" : "Passwords don't match"}
+                                    <Text style={[
+                                        styles.matchText,
+                                        { color: password === confirmPassword ? COLORS.success : COLORS.accent }
+                                    ]}>
+                                        {password === confirmPassword ? "Passwords match" : "Passwords don't match"}
                                     </Text>
                                 </View>
                             )}
                         </View>
 
-                        {/* Terms and Conditions */}
-                        <View style={styles.termsContainer}>
-                            <Text style={styles.termsText}>
-                                By creating an account, you agree to our{" "}
-                                <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-                                <Text style={styles.termsLink}>Privacy Policy</Text>
-                            </Text>
-                        </View>
-
-                        {/* Create Account Button */}
+                        {/* Elegant Terms Agreement */}
                         <TouchableOpacity
-                            style={[
-                                styles.createButton,
-                                loading && styles.createButtonDisabled,
-                                (passwordStrength < 3 || !email || !confirmPassword) &&
-                                styles.createButtonDisabled,
-                            ]}
-                            onPress={signUp}
-                            disabled={
-                                loading ||
-                                passwordStrength < 3 ||
-                                !email ||
-                                !confirmPassword
-                            }
-                            activeOpacity={0.8}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#FFF" size="small" />
-                            ) : (
-                                <>
-                                    <Text style={styles.createButtonText}>Create Account</Text>
-                                    <Feather name="arrow-right" size={20} color="#FFF" />
-                                </>
-                            )}
-                        </TouchableOpacity>
-
-                        {/* Divider */}
-                        <View style={styles.dividerContainer}>
-                            <View style={styles.divider} />
-                            <Text style={styles.dividerText}>Already have an account?</Text>
-                            <View style={styles.divider} />
-                        </View>
-
-                        {/* Sign In Link */}
-                        <TouchableOpacity
-                            style={styles.signinContainer}
-                            onPress={() => router.replace("/login")}
+                            style={styles.termsContainer}
+                            onPress={() => setAcceptTerms(!acceptTerms)}
                             disabled={loading}
+                            activeOpacity={0.7}
                         >
-                            <Text style={styles.signinText}>Sign in to your account</Text>
-                            <Feather name="log-in" size={18} color="#4A90E2" />
+                            <View style={[
+                                styles.checkbox,
+                                acceptTerms && styles.checkboxChecked,
+                            ]}>
+                                {acceptTerms && (
+                                    <Feather name="check" size={12} color="#FFFFFF" />
+                                )}
+                            </View>
+                            <Text style={styles.termsText}>
+                                I agree to the Terms of Service and Privacy Policy
+                            </Text>
                         </TouchableOpacity>
-                    </View>
-                </Animated.View>
-            </ScrollView>
-        </KeyboardAvoidingView>
+
+                        {/* Elegant Create Button without purple shadow */}
+                        <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.createButton,
+                                    loading && styles.buttonDisabled,
+                                    (!acceptTerms || passwordStrength < 3) && styles.buttonInactive,
+                                ]}
+                                onPress={validateAndSignUp}
+                                disabled={loading || !acceptTerms || passwordStrength < 3}
+                                activeOpacity={0.9}
+                            >
+                                {loading ? (
+                                    <View style={styles.loading}>
+                                        <View style={styles.loadingDot} />
+                                        <View style={styles.loadingDot} />
+                                        <View style={styles.loadingDot} />
+                                    </View>
+                                ) : (
+                                    <>
+                                        <Text style={styles.buttonText}>Create Account</Text>
+                                        <Feather name="arrow-right" size={18} color="#FFFFFF" style={styles.buttonIcon} />
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </Animated.View>
+                </KeyboardAvoidingView>
+            </View>
+        </TouchableWithoutFeedback>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: "#F8FAFC",
+        backgroundColor: COLORS.background,
     },
-    scrollContainer: {
-        flexGrow: 1,
-        paddingHorizontal: 24,
-        paddingVertical: 40,
-    },
-    content: {
-        width: "100%",
-        maxWidth: 400,
-        alignSelf: "center",
-        position: "relative",
-    },
-    successOverlay: {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: "rgba(255, 255, 255, 0.95)",
-        justifyContent: "center",
-        alignItems: "center",
-        zIndex: 1000,
-        borderRadius: 20,
-    },
-    successContainer: {
-        alignItems: "center",
-    },
-    successText: {
-        fontSize: 24,
-        fontWeight: "700",
-        color: "#1A1A1A",
-        marginTop: 20,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    successSubtext: {
-        fontSize: 16,
-        color: "#666",
-        marginTop: 8,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+    keyboardAvoid: {
+        flex: 1,
     },
     header: {
-        alignItems: "center",
-        marginBottom: 40,
-        position: "relative",
+        height: height * 0.25,
+        paddingHorizontal: 24,
+        justifyContent: 'flex-end',
+        paddingBottom: 30,
     },
-    backButton: {
-        position: "absolute",
-        left: 0,
-        top: 0,
-        padding: 8,
-    },
-    logoContainer: {
-        width: 80,
-        height: 80,
-        borderRadius: 24,
-        backgroundColor: "#E8F2FF",
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 24,
-        shadowColor: "#4A90E2",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 12,
-        elevation: 5,
+    titleContainer: {
+        alignItems: 'center',
     },
     title: {
-        fontSize: 32,
-        fontWeight: "700",
-        color: "#1A1A1A",
+        fontSize: 36,
+        fontWeight: "800",
+        color: COLORS.textLight,
         marginBottom: 8,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+        letterSpacing: -0.5,
     },
     subtitle: {
         fontSize: 16,
-        color: "#666",
-        textAlign: "center",
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+        color: "rgba(255, 255, 255, 0.85)",
+        fontWeight: "500",
     },
-    formContainer: {
-        width: "100%",
+    formCard: {
+        flex: 1,
+        backgroundColor: COLORS.surface,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        paddingHorizontal: 24,
+        paddingTop: 40,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -8 },
+        shadowOpacity: 0.05,
+        shadowRadius: 16,
+        elevation: 8,
     },
-    inputContainer: {
-        marginBottom: 24,
+    field: {
+        marginBottom: 28,
     },
-    inputLabelContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginBottom: 8,
+    fieldLabelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 10,
     },
-    inputIcon: {
+    labelWithHelp: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    fieldLabel: {
+        fontSize: 15,
+        fontWeight: "600",
+        color: COLORS.text,
         marginRight: 8,
     },
-    inputLabel: {
-        fontSize: 14,
-        fontWeight: "500",
-        color: "#666",
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+    helpIcon: {
+        padding: 2,
     },
-    inputLabelFocused: {
-        color: "#4A90E2",
-    },
-    input: {
-        backgroundColor: "#FFF",
-        borderWidth: 1,
-        borderColor: "#E2E8F0",
-        borderRadius: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        fontSize: 16,
-        color: "#1A1A1A",
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-        elevation: 2,
+    inputContainer: {
+        backgroundColor: COLORS.subtleBlue,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        borderColor: COLORS.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+        overflow: 'hidden',
     },
     inputFocused: {
-        borderColor: "#4A90E2",
-        borderWidth: 2,
-        shadowColor: "#4A90E2",
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        borderColor: COLORS.primary,
+        backgroundColor: COLORS.surface,
     },
     inputError: {
-        borderColor: "#FF6B6B",
+        borderColor: COLORS.accent,
+        backgroundColor: '#FEF2F2',
     },
-    errorText: {
-        color: "#FF6B6B",
-        fontSize: 12,
-        marginTop: 4,
-        marginLeft: 4,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    passwordContainer: {
-        position: "relative",
+    input: {
+        flex: 1,
+        fontSize: 16,
+        color: COLORS.text,
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+        fontWeight: '500',
     },
     passwordInput: {
-        paddingRight: 50,
+        paddingRight: 44,
     },
-    visibilityToggle: {
-        position: "absolute",
+    eyeButton: {
+        position: 'absolute',
         right: 16,
-        top: 14,
         padding: 4,
     },
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+    },
+    errorText: {
+        color: COLORS.accent,
+        fontSize: 13,
+        marginLeft: 6,
+        fontWeight: '500',
+    },
     strengthContainer: {
-        flexDirection: "row",
-        alignItems: "center",
         marginTop: 12,
-        marginBottom: 8,
     },
     strengthBar: {
-        flex: 1,
-        flexDirection: "row",
         height: 4,
-        backgroundColor: "#E2E8F0",
+        backgroundColor: COLORS.border,
         borderRadius: 2,
-        overflow: "hidden",
-        marginRight: 12,
+        overflow: 'hidden',
+        marginBottom: 6,
     },
-    strengthSegment: {
-        flex: 1,
-        height: "100%",
-        marginHorizontal: 1,
+    strengthFill: {
+        height: '100%',
         borderRadius: 2,
     },
     strengthText: {
-        fontSize: 12,
-        fontWeight: "600",
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    requirementsContainer: {
-        backgroundColor: "#F8FAFC",
-        borderRadius: 8,
-        padding: 12,
-        marginTop: 8,
-    },
-    requirementsTitle: {
-        fontSize: 12,
-        fontWeight: "600",
-        color: "#666",
-        marginBottom: 8,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    requirementItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginBottom: 6,
-    },
-    requirementText: {
-        fontSize: 12,
-        color: "#666",
-        marginLeft: 8,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    requirementMet: {
-        color: "#4CAF50",
-        fontWeight: "500",
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'right',
     },
     matchContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginTop: 8,
-        marginLeft: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 12,
+        paddingHorizontal: 4,
     },
     matchText: {
-        fontSize: 12,
-        marginLeft: 6,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+        fontSize: 13,
+        marginLeft: 8,
+        fontWeight: '500',
     },
     termsContainer: {
-        marginBottom: 24,
-        paddingHorizontal: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 32,
+        marginTop: 8,
+        padding: 12,
+        backgroundColor: COLORS.subtleBlue,
+        borderRadius: 12,
+    },
+    checkbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 5,
+        borderWidth: 2,
+        borderColor: COLORS.primary,
+        marginRight: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    checkboxChecked: {
+        backgroundColor: COLORS.primary,
+        borderColor: COLORS.primary,
     },
     termsText: {
-        fontSize: 12,
-        color: "#666",
-        textAlign: "center",
-        lineHeight: 18,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    termsLink: {
-        color: "#4A90E2",
-        fontWeight: "500",
+        fontSize: 14,
+        color: COLORS.text,
+        flex: 1,
+        lineHeight: 20,
     },
     createButton: {
-        backgroundColor: "#4A90E2",
-        borderRadius: 12,
-        paddingVertical: 16,
-        paddingHorizontal: 24,
+        backgroundColor: COLORS.primary,
+        borderRadius: 14,
+        paddingVertical: 18,
         flexDirection: "row",
         justifyContent: "center",
         alignItems: "center",
-        marginBottom: 32,
-        shadowColor: "#4A90E2",
+        // Elegant shadow without purple tint
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 6,
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+        elevation: 5,
     },
-    createButtonDisabled: {
-        backgroundColor: "#A0C4FF",
-        shadowOpacity: 0.1,
+    buttonDisabled: {
+        backgroundColor: '#A0C4FF',
+        opacity: 0.8,
     },
-    createButtonText: {
-        color: "#FFF",
-        fontSize: 18,
+    buttonInactive: {
+        backgroundColor: '#CBD5E1',
+        shadowOpacity: 0,
+    },
+    buttonText: {
+        color: '#FFFFFF',
+        fontSize: 17,
         fontWeight: "600",
-        marginRight: 8,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+        letterSpacing: 0.3,
     },
-    dividerContainer: {
+    buttonIcon: {
+        marginLeft: 10,
+    },
+    loading: {
         flexDirection: "row",
         alignItems: "center",
-        marginBottom: 24,
     },
-    divider: {
-        flex: 1,
-        height: 1,
-        backgroundColor: "#E2E8F0",
-    },
-    dividerText: {
-        color: "#666",
-        paddingHorizontal: 16,
-        fontSize: 14,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
-    },
-    signinContainer: {
-        flexDirection: "row",
-        justifyContent: "center",
-        alignItems: "center",
-        paddingVertical: 12,
-    },
-    signinText: {
-        color: "#4A90E2",
-        fontSize: 16,
-        fontWeight: "600",
-        marginRight: 8,
-        fontFamily: Platform.OS === "ios" ? "System" : "Roboto",
+    loadingDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#FFFFFF',
+        marginHorizontal: 3,
     },
 });
