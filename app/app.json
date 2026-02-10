@@ -37,7 +37,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "@rnmapbox/maps"
     ],
     "experiments": {
       "typedRoutes": true

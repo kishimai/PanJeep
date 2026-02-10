@@ -1,277 +1,398 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useReducer } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    TextInput,
     StatusBar,
     Platform,
     Dimensions,
     Alert,
     Animated,
-    PanResponder,
-    Easing,
+    RefreshControl,
 } from 'react-native';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
-import { getCurrentPositionAsync, requestForegroundPermissionsAsync } from 'expo-location';
-import { MaterialIcons, FontAwesome5, Feather } from '@expo/vector-icons';
+import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { getCurrentPositionAsync, requestForegroundPermissionsAsync, watchPositionAsync, Accuracy } from 'expo-location';
+import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { useFocusEffect } from '@react-navigation/native';
+import NetInfo from '@react-native-community/netinfo';
 
 const { width, height } = Dimensions.get('window');
 
-// Refined color palette
+// Clean, modern color palette
 const COLORS = {
     background: "#FFFFFF",
     surface: "#FFFFFF",
-    text: "#1F2937",
-    textMuted: "#6B7280",
-    textLight: "#FFFFFF",
-    primary: "#39A0ED",
-    primaryLight: "rgba(57, 160, 237, 0.1)",
-    primaryMedium: "rgba(57, 160, 237, 0.15)",
-    accent: "#F87171",
-    border: "rgba(229, 231, 235, 0.5)",
-    success: "#10B981",
-    warning: "#F59E0B",
-    info: "#3B82F6",
-    subtle: "#F9FAFB",
-    mapRoute: "#39A0ED",
-    mapRouteActive: "#F87171",
-    overlay: "rgba(0, 0, 0, 0.1)",
+    text: {
+        primary: "#111827",
+        secondary: "#4B5563",
+        tertiary: "#9CA3AF",
+        light: "#FFFFFF",
+    },
+    primary: {
+        main: "#3B82F6",
+        light: "#EFF6FF",
+        medium: "#DBEAFE",
+        dark: "#1D4ED8",
+    },
+    accent: "#EF4444",
+    border: {
+        light: "#F3F4F6",
+        medium: "#E5E7EB",
+    },
+    status: {
+        success: "#10B981",
+        warning: "#F59E0B",
+        error: "#EF4444",
+    },
+    map: {
+        route: "#3B82F6",
+        active: "#10B981",
+        highlight: "#8B5CF6",
+        userLocation: "#3B82F6",
+    },
+    routeType: {
+        community: "#8B5CF6",
+        field: "#10B981",
+        system: "#3B82F6",
+    },
 };
 
-export default function PassengerRoutes() {
-    // State Management
-    const [activeRoute, setActiveRoute] = useState(null);
-    const [userLocation, setUserLocation] = useState(null);
-    const [routes, setRoutes] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [selectedRouteDetails, setSelectedRouteDetails] = useState(null);
-    const [mapRegion, setMapRegion] = useState(null);
-    const [bottomSheetHeight] = useState(new Animated.Value(0.3 * height));
-    const [searchFocused, setSearchFocused] = useState(false);
-    const [routeInfoVisible, setRouteInfoVisible] = useState(false);
+// Helper functions
+const normalizeCoordinates = (coords) => {
+    if (!coords || !Array.isArray(coords)) return [];
 
-    // Refs
+    const normalized = [];
+    for (const coord of coords) {
+        if (!Array.isArray(coord) || coord.length < 2) continue;
+
+        const [longitude, latitude] = coord;
+
+        if (typeof latitude !== 'number' || typeof longitude !== 'number') continue;
+
+        if (latitude < 4 || latitude > 21 || longitude < 116 || longitude > 127) continue;
+
+        normalized.push({ latitude, longitude });
+    }
+    return normalized;
+};
+
+const calculateRegion = (coordinates, includeUserLocation = null, padding = 0.05) => {
+    if (!coordinates || coordinates.length === 0) {
+        return {
+            latitude: 14.5995,
+            longitude: 120.9842,
+            latitudeDelta: 0.1,
+            longitudeDelta: 0.1,
+        };
+    }
+
+    let allCoords = [...coordinates];
+    if (includeUserLocation) {
+        allCoords.push(includeUserLocation);
+    }
+
+    let minLat = allCoords[0].latitude;
+    let maxLat = allCoords[0].latitude;
+    let minLng = allCoords[0].longitude;
+    let maxLng = allCoords[0].longitude;
+
+    for (const coord of allCoords) {
+        if (coord.latitude < minLat) minLat = coord.latitude;
+        if (coord.latitude > maxLat) maxLat = coord.latitude;
+        if (coord.longitude < minLng) minLng = coord.longitude;
+        if (coord.longitude > maxLng) maxLng = coord.longitude;
+    }
+
+    const latitude = (minLat + maxLat) / 2;
+    const longitude = (minLng + maxLng) / 2;
+    const latitudeDelta = (maxLat - minLat) * (1 + padding);
+    const longitudeDelta = (maxLng - minLng) * (1 + padding);
+    const minDelta = 0.01;
+
+    return {
+        latitude,
+        longitude,
+        latitudeDelta: Math.max(latitudeDelta, minDelta),
+        longitudeDelta: Math.max(longitudeDelta, minDelta),
+    };
+};
+
+const extractRouteName = (routeCode, originType) => {
+    if (!routeCode) return 'Jeepney Route';
+    const originTypes = {
+        community: 'Community',
+        field: 'Field',
+        system: 'System'
+    };
+    return `${routeCode}`;
+};
+
+const extractCoordinates = (geometry) => {
+    if (!geometry) return [];
+    try {
+        const parsed = typeof geometry === 'string' ? JSON.parse(geometry) : geometry;
+        return parsed?.coordinates || [];
+    } catch (e) {
+        return [];
+    }
+};
+
+const calculateFare = (lengthMeters) => {
+    if (!lengthMeters) return '₱12-15';
+    const lengthKm = lengthMeters / 1000;
+    const baseFare = 12;
+    const ratePerKm = 2;
+    const freeKm = 5;
+
+    let fare = baseFare;
+    if (lengthKm > freeKm) {
+        fare += Math.ceil((lengthKm - freeKm) * ratePerKm);
+    }
+
+    const minFare = Math.max(12, fare - 3);
+    const maxFare = fare + 3;
+    return `₱${minFare}-${maxFare}`;
+};
+
+const calculateTravelTime = (lengthMeters) => {
+    if (!lengthMeters) return '45-60 min';
+    const lengthKm = lengthMeters / 1000;
+    const estimatedMinutes = Math.round((lengthKm / 20) * 60);
+    const minTime = Math.max(15, estimatedMinutes - 15);
+    const maxTime = estimatedMinutes + 15;
+    return `${minTime}-${maxTime} min`;
+};
+
+// Calculate route segments for arrow markers
+const calculateRouteSegments = (coordinates, segmentLength = 0.1) => {
+    if (!coordinates || coordinates.length < 2) return [];
+
+    const segments = [];
+    for (let i = 0; i < coordinates.length - 1; i += 2) {
+        segments.push({
+            start: coordinates[i],
+            end: coordinates[i + 1],
+            index: i
+        });
+    }
+    return segments.slice(-3); // Only show arrows at the end of route
+};
+
+// State reducer
+const initialState = {
+    routes: [],
+    loading: true,
+    refreshing: false,
+    userLocation: null,
+    activeRoute: null,
+    mapRegion: null,
+    regionMap: new Map(),
+    initialRegionSet: false,
+    bottomSheetExpanded: false,
+};
+
+function reducer(state, action) {
+    switch (action.type) {
+        case 'SET_ROUTES':
+            return { ...state, routes: action.payload };
+        case 'SET_LOADING':
+            return { ...state, loading: action.payload };
+        case 'SET_REFRESHING':
+            return { ...state, refreshing: action.payload };
+        case 'SET_USER_LOCATION':
+            return { ...state, userLocation: action.payload };
+        case 'SET_ACTIVE_ROUTE':
+            return { ...state, activeRoute: action.payload };
+        case 'SET_MAP_REGION':
+            return { ...state, mapRegion: action.payload, initialRegionSet: true };
+        case 'SET_REGION_MAP':
+            return { ...state, regionMap: action.payload };
+        case 'SET_BOTTOM_SHEET_EXPANDED':
+            return { ...state, bottomSheetExpanded: action.payload };
+        default:
+            return state;
+    }
+}
+
+// Optimized custom hooks
+const useLocation = () => {
+    const [userLocation, setUserLocation] = useState(null);
+    const isMounted = useRef(true);
+    const locationSubscription = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            isMounted.current = false;
+            if (locationSubscription.current) {
+                locationSubscription.current.remove();
+                locationSubscription.current = null;
+            }
+        };
+    }, []);
+
+    const initialize = useCallback(async () => {
+        try {
+            const { status } = await requestForegroundPermissionsAsync();
+            if (status !== 'granted') return;
+
+            const location = await getCurrentPositionAsync({
+                accuracy: Accuracy.Balanced,
+            });
+
+            if (isMounted.current) {
+                const userCoords = {
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                };
+                setUserLocation(userCoords);
+            }
+
+            const sub = await watchPositionAsync(
+                {
+                    accuracy: Accuracy.Low,
+                    timeInterval: 60000,
+                    distanceInterval: 100,
+                },
+                (newLocation) => {
+                    if (isMounted.current) {
+                        setUserLocation(newLocation.coords);
+                    }
+                }
+            );
+
+            locationSubscription.current = sub;
+        } catch (error) {
+            console.warn('Location error:', error);
+        }
+    }, []);
+
+    return { userLocation, initialize };
+};
+
+const useRouteData = () => {
+    const [state, dispatch] = useReducer(reducer, initialState);
+    const [isOffline, setIsOffline] = useState(false);
+
+    // Animation refs
+    const bottomSheetHeight = useRef(new Animated.Value(0.2 * height)).current;
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+
+    // Memoized refs
     const mapRef = useRef(null);
     const bottomSheetRef = useRef(null);
-    const searchRef = useRef(null);
+    const isMounted = useRef(true);
+    const loadingRef = useRef(false);
 
-    // Animation values - Using transform scaleY instead of height for native driver
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideUpAnim = useRef(new Animated.Value(50)).current;
+    // Custom hooks
+    const { userLocation, initialize: initializeLocation } = useLocation();
 
-    // Route Info Panel Animations
-    const routeInfoScaleY = useRef(new Animated.Value(0)).current; // ScaleY instead of height
-    const routeInfoScale = useRef(new Animated.Value(0.95)).current;
-    const routeInfoOpacity = useRef(new Animated.Value(0)).current;
-    const routeInfoSlide = useRef(new Animated.Value(100)).current;
-    const routeInfoContentOpacity = useRef(new Animated.Value(0)).current;
-
-    // Overlay animation
-    const overlayOpacity = useRef(new Animated.Value(0)).current;
-
-    // Loading animations
-    const loadingDots = [
-        useRef(new Animated.Value(0)).current,
-        useRef(new Animated.Value(0)).current,
-        useRef(new Animated.Value(0)).current,
-    ];
-
-    // Enhanced PanResponder for smooth interactions
-    const panResponder = useRef(
-        PanResponder.create({
-            onStartShouldSetPanResponder: () => true,
-            onMoveShouldSetPanResponder: (_, gestureState) =>
-                Math.abs(gestureState.dy) > 5 && !routeInfoVisible,
-            onPanResponderMove: (_, gestureState) => {
-                if (!routeInfoVisible) {
-                    const newHeight = Math.max(0.25 * height, Math.min(0.8 * height, 0.3 * height - gestureState.dy));
-                    bottomSheetHeight.setValue(newHeight);
-                }
-            },
-            onPanResponderRelease: (_, gestureState) => {
-                if (routeInfoVisible) return;
-
-                const velocity = gestureState.vy;
-                const currentHeight = bottomSheetHeight._value;
-
-                let targetHeight;
-                if (currentHeight < 0.35 * height || velocity > 1) {
-                    targetHeight = 0.25 * height; // Minimal view
-                } else if (currentHeight > 0.6 * height || velocity < -1) {
-                    targetHeight = 0.8 * height; // Full view
-                } else {
-                    targetHeight = 0.4 * height; // Default view
-                }
-
-                Animated.spring(bottomSheetHeight, {
-                    toValue: targetHeight,
-                    tension: 200,
-                    friction: 20,
-                    useNativeDriver: false,
-                }).start();
-            },
-        })
-    ).current;
-
-    // Enhanced route info panel animation - Fixed to use native driver compatible properties
-    const showRouteInfo = useCallback((route) => {
-        setSelectedRouteDetails(route);
-        setActiveRoute(route.id);
-
-        // Animate bottom sheet up to make room
-        Animated.spring(bottomSheetHeight, {
-            toValue: 0.25 * height,
-            tension: 200,
-            friction: 20,
-            useNativeDriver: false,
-        }).start(() => {
-            setRouteInfoVisible(true);
-
-            // Sequential animation for route info
-            Animated.sequence([
-                // Fade in overlay
-                Animated.timing(overlayOpacity, {
-                    toValue: 1,
-                    duration: 200,
-                    useNativeDriver: true,
-                }),
-                // Animate route info panel with native driver
-                Animated.parallel([
-                    Animated.spring(routeInfoScaleY, {
-                        toValue: 1,
-                        tension: 200,
-                        friction: 20,
-                        useNativeDriver: true,
-                    }),
-                    Animated.spring(routeInfoScale, {
-                        toValue: 1,
-                        tension: 250,
-                        friction: 15,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(routeInfoOpacity, {
-                        toValue: 1,
-                        duration: 200,
-                        useNativeDriver: true,
-                    }),
-                    Animated.spring(routeInfoSlide, {
-                        toValue: 0,
-                        tension: 250,
-                        friction: 15,
-                        useNativeDriver: true,
-                    }),
-                ]),
-                // Fade in content
-                Animated.timing(routeInfoContentOpacity, {
-                    toValue: 1,
-                    duration: 200,
-                    useNativeDriver: true,
-                }),
-            ]).start();
-        });
-
-        // Center map on route
-        if (mapRef.current && route.rawPoints && route.rawPoints.length > 0) {
-            const coordinates = route.rawPoints.map(coord => ({
-                latitude: coord[1],
-                longitude: coord[0],
-            }));
-
-            mapRef.current.fitToCoordinates(coordinates, {
-                edgePadding: { top: 100, right: 50, bottom: 0.8 * height, left: 50 },
-                animated: true,
-            });
-        }
-    }, []);
-
-    const hideRouteInfo = useCallback(() => {
-        // Sequential hide animation
-        Animated.sequence([
-            Animated.timing(routeInfoContentOpacity, {
-                toValue: 0,
-                duration: 150,
-                useNativeDriver: true,
-            }),
-            Animated.parallel([
-                Animated.spring(routeInfoScaleY, {
-                    toValue: 0,
-                    tension: 200,
-                    friction: 20,
-                    useNativeDriver: true,
-                }),
-                Animated.spring(routeInfoScale, {
-                    toValue: 0.95,
-                    tension: 200,
-                    friction: 15,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(routeInfoOpacity, {
-                    toValue: 0,
-                    duration: 200,
-                    useNativeDriver: true,
-                }),
-                Animated.spring(routeInfoSlide, {
-                    toValue: 100,
-                    tension: 200,
-                    friction: 15,
-                    useNativeDriver: true,
-                }),
-            ]),
-            Animated.timing(overlayOpacity, {
-                toValue: 0,
-                duration: 200,
-                useNativeDriver: true,
-            }),
-        ]).start(() => {
-            setRouteInfoVisible(false);
-            setSelectedRouteDetails(null);
-            setActiveRoute(null);
-
-            // Reset bottom sheet to default height
-            Animated.spring(bottomSheetHeight, {
-                toValue: 0.4 * height,
-                tension: 200,
-                friction: 20,
-                useNativeDriver: false,
-            }).start();
-        });
-    }, []);
-
-    // Enhanced loading animation
+    // Network listener
     useEffect(() => {
-        if (loading) {
-            loadingDots.forEach((dot, index) => {
-                Animated.loop(
-                    Animated.sequence([
-                        Animated.delay(index * 150),
-                        Animated.spring(dot, {
-                            toValue: 1,
-                            tension: 200,
-                            friction: 3,
-                            useNativeDriver: true,
-                        }),
-                        Animated.spring(dot, {
-                            toValue: 0,
-                            tension: 200,
-                            friction: 3,
-                            useNativeDriver: true,
-                        }),
-                        Animated.delay(300),
-                    ])
-                ).start();
-            });
-        }
-    }, [loading]);
+        const unsubscribe = NetInfo.addEventListener(state => {
+            const newOfflineStatus = !(state.isConnected && state.isInternetReachable);
+            setIsOffline(newOfflineStatus);
+        });
 
-    // Fetch routes from database
-    const fetchRoutes = useCallback(async () => {
+        return () => unsubscribe();
+    }, []);
+
+    // Update user location in state
+    useEffect(() => {
+        if (userLocation && isMounted.current) {
+            dispatch({ type: 'SET_USER_LOCATION', payload: userLocation });
+        }
+    }, [userLocation]);
+
+    // Cleanup
+    useEffect(() => {
+        return () => {
+            isMounted.current = false;
+            loadingRef.current = false;
+        };
+    }, []);
+
+    // Load region names
+    const loadRegions = useCallback(async () => {
         try {
-            setLoading(true);
+            const { data, error } = await supabase
+                .from('regions')
+                .select('region_id, name, code')
+                .eq('is_active', true);
+
+            if (error) throw error;
+
+            const regionMap = new Map();
+            data.forEach(region => {
+                regionMap.set(region.region_id, region.name || region.code);
+            });
+
+            dispatch({ type: 'SET_REGION_MAP', payload: regionMap });
+            return regionMap;
+        } catch (error) {
+            console.warn('Failed to load regions:', error);
+            return new Map();
+        }
+    }, []);
+
+    // Set initial map region
+    const setInitialMapRegion = useCallback((routes) => {
+        if (!routes || routes.length === 0) {
+            dispatch({
+                type: 'SET_MAP_REGION',
+                payload: {
+                    latitude: 12.8797,
+                    longitude: 121.7740,
+                    latitudeDelta: 5,
+                    longitudeDelta: 5,
+                }
+            });
+            return;
+        }
+
+        const allCoordinates = [];
+        routes.forEach(route => {
+            if (route.normalizedPoints && route.normalizedPoints.length > 0) {
+                allCoordinates.push(...route.normalizedPoints);
+            }
+        });
+
+        if (allCoordinates.length === 0) {
+            dispatch({
+                type: 'SET_MAP_REGION',
+                payload: {
+                    latitude: 12.8797,
+                    longitude: 121.7740,
+                    latitudeDelta: 5,
+                    longitudeDelta: 5,
+                }
+            });
+            return;
+        }
+
+        const region = calculateRegion(allCoordinates, null, 0.1);
+        dispatch({ type: 'SET_MAP_REGION', payload: region });
+    }, []);
+
+    // Load routes with cancellation
+    const loadRoutes = useCallback(async (showLoading = true) => {
+        if (loadingRef.current) return;
+
+        loadingRef.current = true;
+
+        if (showLoading) {
+            dispatch({ type: 'SET_LOADING', payload: true });
+        }
+
+        try {
+            const netInfoState = await NetInfo.fetch();
+            if (!(netInfoState.isConnected && netInfoState.isInternetReachable)) {
+                throw new Error('Network Error: No internet connection');
+            }
+
+            const regionMap = await loadRegions();
 
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) {
@@ -286,501 +407,625 @@ export default function PassengerRoutes() {
                     origin_type,
                     status,
                     geometry,
-                    stops_snapshot,
                     length_meters,
-                    created_at,
                     region_id,
-                    passenger_usage_score
+                    passenger_usage_score,
+                    data_confidence_score,
+                    field_verification_score,
+                    driver_adoption_score,
+                    credit_status,
+                    created_at
                 `)
                 .is('deleted_at', null)
                 .neq('status', 'deprecated')
-                .order('passenger_usage_score', { ascending: false });
+                .order('passenger_usage_score', { ascending: false })
+                .limit(10);
 
             if (error) throw error;
 
+            if (!data || data.length === 0) {
+                dispatch({ type: 'SET_ROUTES', payload: [] });
+                setInitialMapRegion([]);
+                return;
+            }
+
             const transformedRoutes = data.map(route => {
-                let rawPoints = [];
-                if (route.geometry && typeof route.geometry === 'string') {
-                    try {
-                        const parsed = JSON.parse(route.geometry);
-                        if (parsed?.coordinates) {
-                            rawPoints = parsed.coordinates;
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to parse geometry for route ${route.id}:`, e);
-                    }
-                }
-
-                let routeName = 'Unnamed Route';
-                let busNumber = route.route_code || 'N/A';
-
-                if (route.stops_snapshot) {
-                    try {
-                        const stops = typeof route.stops_snapshot === 'string'
-                            ? JSON.parse(route.stops_snapshot)
-                            : route.stops_snapshot;
-
-                        if (stops?.length > 0) {
-                            const firstStop = stops[0];
-                            const lastStop = stops[stops.length - 1];
-                            routeName = `${firstStop?.name || 'Unknown'} → ${lastStop?.name || 'Unknown'}`;
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to parse stops for route ${route.id}:`, e);
-                    }
-                }
+                const rawCoords = extractCoordinates(route.geometry);
+                const normalizedPoints = normalizeCoordinates(rawCoords);
+                const regionName = route.region_id ? regionMap.get(route.region_id) : 'Unknown';
+                const routeSegments = calculateRouteSegments(normalizedPoints);
 
                 return {
                     id: route.id,
                     code: route.route_code || 'N/A',
-                    name: routeName,
-                    busNumber: busNumber,
+                    name: extractRouteName(route.route_code, route.origin_type),
                     status: route.status || 'draft',
-                    color: COLORS.mapRoute,
-                    rawPoints: rawPoints,
-                    region: `Region ${route.region_id || 'N/A'}`,
-                    fare: '₱12-15',
-                    estimatedTime: '45-60 min',
-                    passengers: '20-30',
+                    normalizedPoints,
+                    routeSegments,
+                    originType: route.origin_type,
+                    region: regionName,
+                    fare: calculateFare(route.length_meters),
+                    estimatedTime: calculateTravelTime(route.length_meters),
+                    passengers: Math.floor(Math.random() * 20) + 10,
                     rating: (route.passenger_usage_score || 0).toFixed(1),
-                    length: route.length_meters ? `${(route.length_meters / 1000).toFixed(1)}km` : 'N/A',
+                    length: route.length_meters ? `${(route.length_meters / 1000).toFixed(1)} km` : 'N/A',
+                    confidence: (route.data_confidence_score || 0).toFixed(1),
+                    verification: (route.field_verification_score || 0).toFixed(1),
+                    adoption: (route.driver_adoption_score || 0).toFixed(1),
+                    creditStatus: route.credit_status || 'uncredited',
+                    createdAt: route.created_at,
+                    hasValidCoordinates: normalizedPoints.length > 0,
                 };
             }).filter(route => route !== null);
 
-            setRoutes(transformedRoutes);
+            if (isMounted.current) {
+                dispatch({ type: 'SET_ROUTES', payload: transformedRoutes });
 
-            // Animate in the routes list
-            Animated.parallel([
-                Animated.timing(fadeAnim, {
-                    toValue: 1,
-                    duration: 400,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: true,
-                }),
-                Animated.spring(slideUpAnim, {
-                    toValue: 0,
-                    tension: 180,
-                    friction: 12,
-                    useNativeDriver: true,
-                }),
-            ]).start();
-
-        } catch (error) {
-            console.error('Error fetching routes:', error);
-            Alert.alert(
-                'Connection Error',
-                'Unable to load routes. Please check your connection.',
-                [{ text: 'OK' }]
-            );
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    // Initialize
-    useEffect(() => {
-        const init = async () => {
-            try {
-                const { status } = await requestForegroundPermissionsAsync();
-                if (status === 'granted') {
-                    const location = await getCurrentPositionAsync({});
-                    setUserLocation({
-                        latitude: location.coords.latitude,
-                        longitude: location.coords.longitude,
-                    });
-
-                    setMapRegion({
-                        latitude: location.coords.latitude,
-                        longitude: location.coords.longitude,
-                        latitudeDelta: 0.05,
-                        longitudeDelta: 0.05,
-                    });
+                if (!state.initialRegionSet) {
+                    setInitialMapRegion(transformedRoutes);
                 }
 
-                await fetchRoutes();
-            } catch (error) {
-                console.log('Initialization error:', error);
+                if (showLoading) {
+                    Animated.timing(fadeAnim, {
+                        toValue: 1,
+                        duration: 300,
+                        useNativeDriver: true,
+                    }).start();
+                }
             }
-        };
+        } catch (error) {
+            console.error('Error loading routes:', error);
 
-        init();
-    }, []);
+            if (isMounted.current) {
+                const mockPoints = normalizeCoordinates([
+                    [120.9842, 14.5995], [120.9942, 14.6095], [121.0042, 14.6195],
+                    [121.0142, 14.6295], [121.0242, 14.6395]
+                ]);
 
-    // Filter routes based on search
-    const filteredRoutes = useMemo(() => {
-        if (!searchQuery.trim()) return routes;
+                const mockRoutes = [
+                    {
+                        id: 'mock-1',
+                        code: 'JEEP-001',
+                        name: 'JEEP-001',
+                        status: 'active',
+                        normalizedPoints: mockPoints,
+                        routeSegments: calculateRouteSegments(mockPoints),
+                        originType: 'system',
+                        region: 'Metro Manila',
+                        fare: '₱12-15',
+                        estimatedTime: '45-60 min',
+                        passengers: '20-30',
+                        rating: '4.5',
+                        length: '5.2 km',
+                        confidence: '4.2',
+                        verification: '3.8',
+                        adoption: '4.0',
+                        creditStatus: 'credited',
+                        createdAt: new Date().toISOString(),
+                        hasValidCoordinates: true,
+                    },
+                ];
 
-        const query = searchQuery.toLowerCase();
-        return routes.filter(route =>
-            route.name.toLowerCase().includes(query) ||
-            route.code.toLowerCase().includes(query) ||
-            route.busNumber.toLowerCase().includes(query)
-        );
-    }, [routes, searchQuery]);
+                dispatch({ type: 'SET_ROUTES', payload: mockRoutes });
 
-    // Render route lines on map
-    const renderRouteLines = () => {
-        return filteredRoutes.map(route => {
-            if (!route.rawPoints || route.rawPoints.length < 2) return null;
+                if (!state.initialRegionSet) {
+                    setInitialMapRegion(mockRoutes);
+                }
 
-            const coordinates = route.rawPoints.map(coord => ({
-                latitude: coord[1],
-                longitude: coord[0],
-            }));
+                if (error.message?.includes('Network Error')) {
+                    Alert.alert(
+                        'Offline Mode',
+                        'Showing demo routes. Connect to internet for live data.',
+                        [{ text: 'OK' }]
+                    );
+                }
+            }
+        } finally {
+            if (isMounted.current) {
+                loadingRef.current = false;
+                if (showLoading) {
+                    dispatch({ type: 'SET_LOADING', payload: false });
+                }
+                dispatch({ type: 'SET_REFRESHING', payload: false });
+            }
+        }
+    }, [loadRegions, setInitialMapRegion, state.initialRegionSet]);
 
-            return (
-                <Polyline
-                    key={`line-${route.id}`}
-                    coordinates={coordinates}
-                    strokeColor={activeRoute === route.id ? COLORS.mapRouteActive : route.color}
-                    strokeWidth={activeRoute === route.id ? 5 : 3}
-                    strokeOpacity={activeRoute === route.id ? 0.9 : 0.6}
-                    lineDashPattern={activeRoute === route.id ? undefined : [1, 4]}
+    // Memoized actions
+    const toggleBottomSheet = useCallback(() => {
+        const targetHeight = state.bottomSheetExpanded ? 0.2 * height : 0.7 * height;
+
+        Animated.spring(bottomSheetHeight, {
+            toValue: targetHeight,
+            tension: 200,
+            friction: 20,
+            useNativeDriver: false,
+        }).start();
+
+        dispatch({ type: 'SET_BOTTOM_SHEET_EXPANDED', payload: !state.bottomSheetExpanded });
+    }, [state.bottomSheetExpanded]);
+
+    const focusOnRoute = useCallback((route) => {
+        if (!route || !route.hasValidCoordinates) {
+            Alert.alert('Error', 'This route has no valid location data.');
+            return;
+        }
+
+        dispatch({ type: 'SET_ACTIVE_ROUTE', payload: route.id });
+
+        if (mapRef.current && route.normalizedPoints && route.normalizedPoints.length > 0) {
+            const region = calculateRegion(route.normalizedPoints, null, 0.15);
+            mapRef.current.animateToRegion(region, 800);
+        }
+
+        // Auto-collapse if expanded
+        if (state.bottomSheetExpanded) {
+            setTimeout(() => toggleBottomSheet(), 300);
+        }
+    }, [state.bottomSheetExpanded, toggleBottomSheet]);
+
+    const centerOnUser = useCallback(() => {
+        if (state.userLocation && mapRef.current) {
+            const region = {
+                latitude: state.userLocation.latitude,
+                longitude: state.userLocation.longitude,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+            };
+            mapRef.current.animateToRegion(region, 800);
+        } else {
+            Alert.alert('Location Unavailable', 'Your location is not available. Please enable location services.');
+        }
+    }, [state.userLocation]);
+
+    const showAllRoutes = useCallback(() => {
+        if (state.routes.length > 0 && mapRef.current) {
+            const allCoordinates = [];
+            state.routes.forEach(route => {
+                if (route.normalizedPoints && route.normalizedPoints.length > 0) {
+                    allCoordinates.push(...route.normalizedPoints);
+                }
+            });
+
+            if (allCoordinates.length > 0) {
+                const region = calculateRegion(allCoordinates, null, 0.1);
+                mapRef.current.animateToRegion(region, 800);
+            }
+        }
+    }, [state.routes]);
+
+    // Load data on focus
+    useFocusEffect(
+        useCallback(() => {
+            if (isMounted.current) {
+                initializeLocation();
+                loadRoutes(true);
+            }
+
+            return () => {
+                // Cleanup handled by useLocation hook
+            };
+        }, [initializeLocation, loadRoutes])
+    );
+
+    // Refresh control
+    const onRefresh = useCallback(() => {
+        dispatch({ type: 'SET_REFRESHING', payload: true });
+        loadRoutes(false);
+    }, [loadRoutes]);
+
+    return {
+        state,
+        isOffline,
+        mapRef,
+        bottomSheetRef,
+        bottomSheetHeight,
+        fadeAnim,
+        toggleBottomSheet,
+        focusOnRoute,
+        centerOnUser,
+        showAllRoutes,
+        loadRoutes,
+        onRefresh,
+    };
+};
+
+// Sub-components
+const LoadingScreen = React.memo(() => {
+    return (
+        <View style={styles.loadingContainer}>
+            <View style={styles.loadingContent}>
+                <MaterialIcons
+                    name="directions-bus"
+                    size={48}
+                    color={COLORS.primary.main}
+                    style={styles.loadingIcon}
                 />
-            );
-        });
+                <Text style={styles.loadingTitle}>Loading Jeepney Routes</Text>
+            </View>
+        </View>
+    );
+});
+
+const OfflineIndicator = React.memo(({ isOffline }) => {
+    if (!isOffline) return null;
+
+    return (
+        <View style={styles.offlineIndicator}>
+            <Feather name="wifi-off" size={14} color={COLORS.text.light} />
+            <Text style={styles.offlineText}>Offline Mode</Text>
+        </View>
+    );
+});
+
+const MapControls = React.memo(({ onCenterUser, onShowAllRoutes, userLocation }) => {
+    return (
+        <View style={styles.mapControls}>
+            {userLocation && (
+                <TouchableOpacity
+                    style={styles.mapControlButton}
+                    onPress={onCenterUser}
+                    activeOpacity={0.7}
+                >
+                    <Feather name="navigation" size={20} color={COLORS.primary.main} />
+                </TouchableOpacity>
+            )}
+            <TouchableOpacity
+                style={styles.mapControlButton}
+                onPress={onShowAllRoutes}
+                activeOpacity={0.7}
+            >
+                <Feather name="map" size={20} color={COLORS.primary.main} />
+            </TouchableOpacity>
+        </View>
+    );
+});
+
+const RouteCard = React.memo(({
+                                  route,
+                                  isActive,
+                                  onPress,
+                              }) => {
+    const getRouteTypeColor = (type) => {
+        return COLORS.routeType[type] || COLORS.text.tertiary;
     };
 
-    // Enhanced Route Card with tap animation
-    const RouteCard = ({ route }) => {
-        const cardScale = useRef(new Animated.Value(1)).current;
+    const getRouteTypeLabel = (type) => {
+        return type === 'community' ? 'COM' : type === 'field' ? 'FLD' : 'SYS';
+    };
 
-        const handlePress = () => {
-            // Scale animation on press
-            Animated.sequence([
-                Animated.spring(cardScale, {
-                    toValue: 0.98,
-                    tension: 300,
-                    friction: 8,
-                    useNativeDriver: true,
-                }),
-                Animated.spring(cardScale, {
-                    toValue: 1,
-                    tension: 300,
-                    friction: 8,
-                    useNativeDriver: true,
-                }),
-            ]).start();
-
-            // Show route info after animation
-            setTimeout(() => showRouteInfo(route), 100);
-        };
-
-        return (
-            <Animated.View style={{ transform: [{ scale: cardScale }] }}>
-                <TouchableOpacity
-                    style={[
-                        styles.routeCard,
-                        activeRoute === route.id && styles.routeCardActive
-                    ]}
-                    onPress={handlePress}
-                    activeOpacity={0.9}
-                >
-                    <View style={styles.routeCardContent}>
-                        <View style={styles.routeCardIcon}>
-                            <MaterialIcons
-                                name="directions-bus"
-                                size={18}
-                                color={activeRoute === route.id ? COLORS.textLight : COLORS.primary}
-                            />
-                        </View>
-                        <View style={styles.routeCardInfo}>
-                            <Text style={styles.routeCardName} numberOfLines={1}>
-                                {route.name}
+    return (
+        <TouchableOpacity
+            style={[
+                styles.routeCard,
+                isActive && styles.routeCardActive
+            ]}
+            onPress={onPress}
+            activeOpacity={0.9}
+        >
+            <View style={styles.routeCardContent}>
+                <View style={styles.routeCardHeader}>
+                    <View style={styles.routeCodeContainer}>
+                        <Text style={styles.routeCardCode}>{route.code}</Text>
+                        <View style={styles.routeTypeTag}>
+                            <Text style={[styles.routeTypeText, { color: getRouteTypeColor(route.originType) }]}>
+                                {getRouteTypeLabel(route.originType)}
                             </Text>
-                            <Text style={styles.routeCardCode}>
-                                Route {route.code}
-                            </Text>
-                        </View>
-                        <View style={styles.routeCardMeta}>
-                            <Text style={styles.routeCardFare}>{route.fare}</Text>
-                            <View style={styles.routeCardRating}>
-                                <MaterialIcons name="star" size={12} color={COLORS.warning} />
-                                <Text style={styles.routeCardRatingText}>{route.rating}</Text>
-                            </View>
                         </View>
                     </View>
-                </TouchableOpacity>
-            </Animated.View>
-        );
-    };
 
-    // Enhanced loading state
-    if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <View style={styles.loadingContent}>
-                    <MaterialIcons
-                        name="directions-bus"
-                        size={56}
-                        color={COLORS.primary}
-                        style={styles.loadingIcon}
-                    />
-                    <Text style={styles.loadingTitle}>Finding routes</Text>
-                    <Text style={styles.loadingSubtitle}>Discovering the best jeepney routes near you</Text>
+                    <View style={styles.routeDetails}>
+                        <View style={styles.detailItem}>
+                            <MaterialIcons name="schedule" size={12} color={COLORS.text.tertiary} />
+                            <Text style={styles.detailText}>{route.estimatedTime}</Text>
+                        </View>
+                        <View style={styles.detailItem}>
+                            <MaterialIcons name="attach-money" size={12} color={COLORS.text.tertiary} />
+                            <Text style={styles.detailText}>{route.fare}</Text>
+                        </View>
+                    </View>
+                </View>
 
-                    <View style={styles.loadingDotsContainer}>
-                        {loadingDots.map((dot, index) => (
-                            <Animated.View
-                                key={index}
-                                style={[
-                                    styles.loadingDot,
-                                    {
-                                        backgroundColor: COLORS.primary,
-                                        transform: [
-                                            {
-                                                translateY: dot.interpolate({
-                                                    inputRange: [0, 1],
-                                                    outputRange: [0, -10]
-                                                })
-                                            }
-                                        ]
-                                    }
-                                ]}
-                            />
-                        ))}
+                <View style={styles.routeCardFooter}>
+                    <View style={styles.footerItem}>
+                        <MaterialIcons name="star" size={12} color={COLORS.status.warning} />
+                        <Text style={styles.footerText}>{route.rating}</Text>
+                    </View>
+                    <View style={styles.footerItem}>
+                        <Feather name="users" size={12} color={COLORS.text.tertiary} />
+                        <Text style={styles.footerText}>{route.passengers}</Text>
+                    </View>
+                    <View style={styles.footerItem}>
+                        <Feather name="map-pin" size={12} color={COLORS.text.tertiary} />
+                        <Text style={styles.footerText}>{route.region}</Text>
                     </View>
                 </View>
             </View>
-        );
+        </TouchableOpacity>
+    );
+});
+
+const MapRoutes = React.memo(({ routes, activeRoute, mapRef, region, userLocation }) => {
+    const renderRouteLines = useCallback(() => {
+        return routes.map(route => {
+            if (!route.normalizedPoints || route.normalizedPoints.length < 2) {
+                return null;
+            }
+
+            const isActive = activeRoute === route.id;
+            const routeColor = isActive ? COLORS.map.active :
+                route.originType === 'community' ? COLORS.routeType.community :
+                    route.originType === 'field' ? COLORS.routeType.field :
+                        COLORS.map.route;
+
+            return (
+                <React.Fragment key={`route-${route.id}`}>
+                    {/* Main route line - thicker for active routes */}
+                    <Polyline
+                        coordinates={route.normalizedPoints}
+                        strokeColor={routeColor}
+                        strokeWidth={isActive ? 6 : 4}
+                        strokeOpacity={isActive ? 1 : 0.9}
+                        lineCap="round"
+                        lineJoin="round"
+                    />
+
+                    {/* Direction arrows along the route */}
+                    {route.routeSegments && route.routeSegments.map((segment, index) => {
+                        // Calculate arrow position and rotation
+                        const lat = (segment.start.latitude + segment.end.latitude) / 2;
+                        const lng = (segment.start.longitude + segment.end.longitude) / 2;
+
+                        const deltaY = segment.end.latitude - segment.start.latitude;
+                        const deltaX = segment.end.longitude - segment.start.longitude;
+                        const angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+
+                        return (
+                            <Marker
+                                key={`arrow-${route.id}-${index}`}
+                                coordinate={{ latitude: lat, longitude: lng }}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                            >
+                                <View style={[
+                                    styles.directionArrow,
+                                    {
+                                        transform: [{ rotate: `${angle}deg` }],
+                                        borderColor: routeColor,
+                                        backgroundColor: isActive ? `${routeColor}20` : '#FFFFFF'
+                                    }
+                                ]}>
+                                    <View style={[
+                                        styles.arrowHead,
+                                        { backgroundColor: routeColor }
+                                    ]} />
+                                </View>
+                            </Marker>
+                        );
+                    })}
+
+                    {/* Start and end markers */}
+                    {route.normalizedPoints.length > 0 && (
+                        <>
+                            <Marker
+                                coordinate={route.normalizedPoints[0]}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                            >
+                                <View style={[styles.routeEndpoint, { backgroundColor: routeColor }]}>
+                                    <Text style={styles.endpointText}>S</Text>
+                                </View>
+                            </Marker>
+                            <Marker
+                                coordinate={route.normalizedPoints[route.normalizedPoints.length - 1]}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                            >
+                                <View style={[styles.routeEndpoint, { backgroundColor: routeColor }]}>
+                                    <Text style={styles.endpointText}>E</Text>
+                                </View>
+                            </Marker>
+                        </>
+                    )}
+                </React.Fragment>
+            );
+        });
+    }, [routes, activeRoute]);
+
+    return (
+        <MapView
+            ref={mapRef}
+            style={styles.map}
+            provider={PROVIDER_GOOGLE}
+            showsUserLocation={true}
+            showsMyLocationButton={false}
+            showsCompass={true}
+            showsScale={true}
+            showsTraffic={false}
+            showsBuildings={true}
+            region={region}
+            mapPadding={{
+                top: 20,
+                right: 20,
+                bottom: 0.2 * height,
+                left: 20
+            }}
+            minZoomLevel={10}
+            maxZoomLevel={18}
+        >
+            {renderRouteLines()}
+
+            {userLocation && (
+                <Marker
+                    coordinate={userLocation}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                >
+                    <View style={styles.userLocationMarker}>
+                        <View style={styles.userLocationInner} />
+                    </View>
+                </Marker>
+            )}
+        </MapView>
+    );
+});
+
+const EmptyStateComponent = React.memo(({ isOffline, onRetry }) => {
+    return (
+        <View style={styles.emptyState}>
+            <Feather
+                name={isOffline ? "wifi-off" : "map"}
+                size={40}
+                color={COLORS.text.tertiary}
+            />
+            <Text style={styles.emptyTitle}>
+                {isOffline ? 'You\'re Offline' : 'No Routes Available'}
+            </Text>
+            <Text style={styles.emptyText}>
+                {isOffline
+                    ? 'Connect to internet to load routes'
+                    : 'Routes will appear here when available'
+                }
+            </Text>
+            <TouchableOpacity
+                style={styles.retryButton}
+                onPress={onRetry}
+            >
+                <Text style={styles.retryButtonText}>
+                    {isOffline ? 'Retry Connection' : 'Refresh Routes'}
+                </Text>
+            </TouchableOpacity>
+        </View>
+    );
+});
+
+// Main Component
+export default function PassengerRoutes() {
+    const {
+        state,
+        isOffline,
+        mapRef,
+        bottomSheetRef,
+        bottomSheetHeight,
+        fadeAnim,
+        toggleBottomSheet,
+        focusOnRoute,
+        centerOnUser,
+        showAllRoutes,
+        loadRoutes,
+        onRefresh,
+    } = useRouteData();
+
+    const handleRetryConnection = useCallback(async () => {
+        const netInfoState = await NetInfo.fetch();
+        const connected = !!(netInfoState.isConnected && netInfoState.isInternetReachable);
+        if (connected) {
+            loadRoutes(true);
+        } else {
+            Alert.alert('No Connection', 'Still offline. Check your network settings.');
+        }
+    }, [loadRoutes]);
+
+    if (state.loading) {
+        return <LoadingScreen />;
     }
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+            <StatusBar
+                barStyle={isOffline ? "light-content" : "dark-content"}
+                backgroundColor={isOffline ? COLORS.status.error : "transparent"}
+                translucent
+            />
 
-            {/* Overlay for route info panel */}
-            <Animated.View
-                style={[
-                    styles.overlay,
-                    {
-                        opacity: overlayOpacity,
-                        pointerEvents: routeInfoVisible ? 'auto' : 'none'
-                    }
-                ]}
-            >
-                <TouchableOpacity
-                    style={styles.overlayTouchArea}
-                    activeOpacity={1}
-                    onPress={hideRouteInfo}
-                />
-            </Animated.View>
+            <OfflineIndicator isOffline={isOffline} />
 
-            {/* Map View */}
-            <MapView
-                ref={mapRef}
-                style={styles.map}
-                provider={PROVIDER_GOOGLE}
-                showsUserLocation={true}
-                showsCompass={false}
-                showsScale={false}
-                showsTraffic={true}
-                showsBuildings={true}
-                region={mapRegion || {
-                    latitude: 14.5995,
-                    longitude: 120.9842,
-                    latitudeDelta: 0.05,
-                    longitudeDelta: 0.05,
-                }}
-                mapPadding={{ top: 0, right: 0, bottom: 0.3 * height, left: 0 }}
-                onPress={routeInfoVisible ? hideRouteInfo : undefined}
-            >
-                {renderRouteLines()}
-            </MapView>
+            <MapRoutes
+                routes={state.routes}
+                activeRoute={state.activeRoute}
+                mapRef={mapRef}
+                region={state.mapRegion}
+                userLocation={state.userLocation}
+            />
 
-            {/* Floating Search Bar */}
-            <Animated.View style={[
-                styles.searchBarContainer,
-                {
-                    transform: [{
-                        translateY: overlayOpacity.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0, -20]
-                        })
-                    }],
-                    opacity: overlayOpacity.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [1, 0.7]
-                    })
-                }
-            ]}>
-                <View style={styles.searchBar}>
-                    <Feather
-                        name="search"
-                        size={20}
-                        color={searchFocused ? COLORS.primary : COLORS.textMuted}
-                        style={styles.searchIcon}
-                    />
-                    <TextInput
-                        ref={searchRef}
-                        style={styles.searchInput}
-                        placeholder="Search routes..."
-                        placeholderTextColor={COLORS.textMuted}
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                        onFocus={() => setSearchFocused(true)}
-                        onBlur={() => setSearchFocused(false)}
-                        returnKeyType="search"
-                    />
-                    {searchQuery ? (
-                        <TouchableOpacity
-                            onPress={() => setSearchQuery('')}
-                            style={styles.clearSearchButton}
-                        >
-                            <Feather name="x" size={18} color={COLORS.textMuted} />
-                        </TouchableOpacity>
-                    ) : null}
-                </View>
-                {searchQuery && (
-                    <Text style={styles.searchResultsText}>
-                        {filteredRoutes.length} routes found
-                    </Text>
-                )}
-            </Animated.View>
+            <MapControls
+                onCenterUser={centerOnUser}
+                onShowAllRoutes={showAllRoutes}
+                userLocation={state.userLocation}
+            />
 
-            {/* Enhanced Route Info Panel - Using scaleY for animation */}
-            <Animated.View
-                style={[
-                    styles.routeInfoContainer,
-                    {
-                        opacity: routeInfoOpacity,
-                        transform: [
-                            { translateY: routeInfoSlide },
-                            { scale: routeInfoScale },
-                            { scaleY: routeInfoScaleY },
-                        ],
-                    }
-                ]}
-                pointerEvents={routeInfoVisible ? 'auto' : 'none'}
-            >
-                {/* Connected bridge to bottom sheet */}
-                <View style={styles.infoBridge} />
-
-                <Animated.View
-                    style={[
-                        styles.routeInfoContent,
-                        { opacity: routeInfoContentOpacity }
-                    ]}
-                >
-                    {/* Header with close button */}
-                    <View style={styles.routeInfoHeader}>
-                        <TouchableOpacity
-                            style={styles.backButton}
-                            onPress={hideRouteInfo}
-                            activeOpacity={0.7}
-                        >
-                            <Feather name="chevron-down" size={24} color={COLORS.text} />
-                        </TouchableOpacity>
-                        <Text style={styles.routeInfoTitle}>Route Details</Text>
-                        <View style={{ width: 40 }} />
-                    </View>
-
-                    {/* Route Info */}
-                    {selectedRouteDetails && (
-                        <>
-                            <View style={styles.routeInfoMain}>
-                                <View style={styles.routeIconLarge}>
-                                    <MaterialIcons name="directions-bus" size={32} color={COLORS.primary} />
-                                </View>
-                                <View style={styles.routeInfoText}>
-                                    <Text style={styles.routeNameLarge} numberOfLines={2}>
-                                        {selectedRouteDetails.name}
-                                    </Text>
-                                    <Text style={styles.routeCodeLarge}>
-                                        Route {selectedRouteDetails.code}
-                                    </Text>
-                                </View>
-                            </View>
-
-                            {/* Quick Stats */}
-                            <View style={styles.quickStats}>
-                                <View style={styles.statItem}>
-                                    <Feather name="clock" size={16} color={COLORS.textMuted} />
-                                    <Text style={styles.statLabel}>Duration</Text>
-                                    <Text style={styles.statValue}>{selectedRouteDetails.estimatedTime}</Text>
-                                </View>
-                                <View style={styles.statDivider} />
-                                <View style={styles.statItem}>
-                                    <Feather name="users" size={16} color={COLORS.textMuted} />
-                                    <Text style={styles.statLabel}>Passengers</Text>
-                                    <Text style={styles.statValue}>{selectedRouteDetails.passengers}</Text>
-                                </View>
-                                <View style={styles.statDivider} />
-                                <View style={styles.statItem}>
-                                    <MaterialIcons name="star" size={16} color={COLORS.warning} />
-                                    <Text style={styles.statLabel}>Rating</Text>
-                                    <Text style={styles.statValue}>{selectedRouteDetails.rating}</Text>
-                                </View>
-                            </View>
-
-                            {/* Fare Section */}
-                            <View style={styles.fareSection}>
-                                <Text style={styles.fareLabel}>Estimated Fare</Text>
-                                <Text style={styles.fareValue}>{selectedRouteDetails.fare}</Text>
-                            </View>
-
-                            {/* Action Button */}
-                            <TouchableOpacity style={styles.navigateButton}>
-                                <MaterialIcons name="directions" size={22} color={COLORS.textLight} />
-                                <Text style={styles.navigateButtonText}>Start Navigation</Text>
-                                <Feather name="arrow-right" size={18} color={COLORS.textLight} style={styles.navigateIcon} />
-                            </TouchableOpacity>
-                        </>
-                    )}
-                </Animated.View>
-            </Animated.View>
-
-            {/* Bottom Sheet */}
             <Animated.View
                 style={[
                     styles.bottomSheet,
                     { height: bottomSheetHeight }
                 ]}
-                {...panResponder.panHandlers}
             >
-                {/* Sheet Handle */}
-                <View style={styles.sheetHandle}>
-                    <View style={styles.sheetDragIndicator} />
-                </View>
-
-                {/* Routes Counter */}
-                <View style={styles.routesCounter}>
-                    <Text style={styles.routesCount}>{routes.length}</Text>
-                    <Text style={styles.routesLabel}>available routes</Text>
-                </View>
-
-                {/* Routes List */}
-                <Animated.ScrollView
-                    ref={bottomSheetRef}
-                    style={styles.routesList}
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={styles.routesListContent}
-                    scrollEventThrottle={16}
+                {/* Sheet Header - Clean toggle button */}
+                <TouchableOpacity
+                    style={styles.sheetToggle}
+                    onPress={toggleBottomSheet}
+                    activeOpacity={0.7}
                 >
-                    {filteredRoutes.length === 0 ? (
-                        <View style={styles.emptyState}>
-                            <Feather name="map" size={44} color={COLORS.textMuted} />
-                            <Text style={styles.emptyTitle}>
-                                {searchQuery ? 'No routes found' : 'No routes available'}
-                            </Text>
-                            <Text style={styles.emptyText}>
-                                {searchQuery
-                                    ? 'Try a different search'
-                                    : 'Check back later for new routes'
-                                }
-                            </Text>
+                    <View style={styles.toggleContent}>
+                        <View style={styles.toggleIcon}>
+                            <Feather
+                                name={state.bottomSheetExpanded ? "chevron-down" : "chevron-up"}
+                                size={22}
+                                color={COLORS.primary.main}
+                            />
                         </View>
-                    ) : (
-                        <Animated.View style={{
-                            opacity: fadeAnim,
-                            transform: [{ translateY: slideUpAnim }]
-                        }}>
-                            {filteredRoutes.map((route) => (
-                                <RouteCard key={route.id} route={route} />
-                            ))}
-                        </Animated.View>
-                    )}
-                </Animated.ScrollView>
+                        <Text style={styles.toggleText}>
+                            {state.bottomSheetExpanded ? 'Hide Routes' : 'Show Routes'}
+                        </Text>
+                        {!isOffline && state.routes.length > 0 && (
+                            <TouchableOpacity
+                                style={styles.refreshButton}
+                                onPress={onRefresh}
+                                disabled={state.refreshing}
+                            >
+                                <Feather
+                                    name="refresh-cw"
+                                    size={16}
+                                    color={state.refreshing ? COLORS.primary.main : COLORS.text.secondary}
+                                />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                </TouchableOpacity>
+
+                <View style={styles.sheetContent}>
+                    <ScrollView
+                        ref={bottomSheetRef}
+                        style={styles.routesList}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.routesListContent}
+                        scrollEventThrottle={16}
+                        refreshControl={
+                            !isOffline && (
+                                <RefreshControl
+                                    refreshing={state.refreshing}
+                                    onRefresh={onRefresh}
+                                    colors={[COLORS.primary.main]}
+                                    tintColor={COLORS.primary.main}
+                                />
+                            )
+                        }
+                    >
+                        {state.routes.length === 0 ? (
+                            <EmptyStateComponent
+                                isOffline={isOffline}
+                                onRetry={handleRetryConnection}
+                            />
+                        ) : (
+                            <Animated.View style={{ opacity: fadeAnim }}>
+                                {state.routes.map((route) => (
+                                    <RouteCard
+                                        key={route.id}
+                                        route={route}
+                                        isActive={state.activeRoute === route.id}
+                                        onPress={() => focusOnRoute(route)}
+                                    />
+                                ))}
+                            </Animated.View>
+                        )}
+                    </ScrollView>
+                </View>
             </Animated.View>
         </View>
     );
@@ -792,18 +1037,6 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.background,
     },
     map: {
-        flex: 1,
-    },
-    overlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: COLORS.overlay,
-        zIndex: 90,
-    },
-    overlayTouchArea: {
         flex: 1,
     },
     // Loading State
@@ -818,76 +1051,108 @@ const styles = StyleSheet.create({
         paddingHorizontal: 40,
     },
     loadingIcon: {
-        marginBottom: 24,
+        marginBottom: 20,
         opacity: 0.9,
     },
     loadingTitle: {
-        fontSize: 28,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: 8,
-        letterSpacing: -0.5,
+        fontSize: 18,
+        fontWeight: '600',
+        color: COLORS.text.primary,
     },
-    loadingSubtitle: {
-        fontSize: 16,
-        color: COLORS.textMuted,
-        textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: 40,
-    },
-    loadingDotsContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        height: 40,
-    },
-    loadingDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        marginHorizontal: 6,
-    },
-    // Search Bar
-    searchBarContainer: {
+    // Offline Indicator
+    offlineIndicator: {
         position: 'absolute',
         top: Platform.OS === 'ios' ? 60 : 40,
-        left: 20,
         right: 20,
-        zIndex: 100,
-    },
-    searchBar: {
+        backgroundColor: COLORS.status.error,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
         borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        zIndex: 101,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    offlineText: {
+        color: COLORS.text.light,
+        fontSize: 12,
+        fontWeight: '600',
+        marginLeft: 6,
+    },
+    // Map Controls
+    mapControls: {
+        position: 'absolute',
+        bottom: 0.25 * height,
+        right: 16,
+        zIndex: 99,
+        gap: 12,
+    },
+    mapControlButton: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
-        shadowRadius: 12,
-        elevation: 8,
+        shadowRadius: 8,
+        elevation: 4,
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.3)',
+        borderColor: COLORS.border.light,
     },
-    searchIcon: {
-        marginRight: 12,
+    // Map Elements
+    userLocationMarker: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: COLORS.map.userLocation,
     },
-    searchInput: {
-        flex: 1,
-        fontSize: 16,
-        color: COLORS.text,
-        padding: 0,
-        fontWeight: '500',
+    userLocationInner: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: COLORS.map.userLocation,
     },
-    clearSearchButton: {
-        padding: 4,
+    directionArrow: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
     },
-    searchResultsText: {
-        fontSize: 13,
-        color: COLORS.textMuted,
-        marginTop: 8,
-        marginLeft: 4,
-        fontWeight: '500',
+    arrowHead: {
+        width: 12,
+        height: 12,
+        borderRadius: 2,
+        transform: [{ rotate: '45deg' }],
+    },
+    routeEndpoint: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 4,
+    },
+    endpointText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
     },
     // Bottom Sheet
     bottomSheet: {
@@ -896,44 +1161,53 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         backgroundColor: COLORS.surface,
-        borderTopLeftRadius: 28,
-        borderTopRightRadius: 28,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -4 },
         shadowOpacity: 0.08,
         shadowRadius: 20,
-        elevation: 12,
-        paddingTop: 12,
-        paddingHorizontal: 20,
+        elevation: 8,
         zIndex: 95,
+        overflow: 'hidden',
     },
-    sheetHandle: {
-        alignItems: 'center',
-        marginBottom: 16,
-        paddingVertical: 8,
+    sheetToggle: {
+        paddingVertical: 16,
+        paddingHorizontal: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border.light,
+        backgroundColor: COLORS.surface,
     },
-    sheetDragIndicator: {
-        width: 36,
-        height: 4,
-        backgroundColor: COLORS.border,
-        borderRadius: 2,
-        opacity: 0.6,
-    },
-    routesCounter: {
+    toggleContent: {
         flexDirection: 'row',
-        alignItems: 'baseline',
-        marginBottom: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    routesCount: {
-        fontSize: 32,
-        fontWeight: '700',
-        color: COLORS.primary,
-        marginRight: 8,
+    toggleIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: COLORS.primary.light,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
     },
-    routesLabel: {
+    toggleText: {
         fontSize: 16,
-        color: COLORS.textMuted,
-        fontWeight: '500',
+        color: COLORS.text.primary,
+        fontWeight: '600',
+        flex: 1,
+    },
+    refreshButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: COLORS.primary.light,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    sheetContent: {
+        flex: 1,
     },
     routesList: {
         flex: 1,
@@ -941,244 +1215,115 @@ const styles = StyleSheet.create({
     routesListContent: {
         paddingBottom: 40,
     },
-    // Route Card
+    // Route Card - Smooth tab design without dividers
     routeCard: {
         backgroundColor: COLORS.surface,
-        borderRadius: 18,
         padding: 16,
-        marginBottom: 12,
-        borderWidth: 1,
-        borderColor: COLORS.border,
+        marginHorizontal: 16,
+        marginVertical: 6,
+        borderRadius: 16,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
-        shadowRadius: 6,
+        shadowRadius: 4,
         elevation: 2,
+        borderWidth: 1,
+        borderColor: COLORS.border.light,
     },
     routeCardActive: {
-        backgroundColor: COLORS.primaryLight,
-        borderColor: COLORS.primary,
+        backgroundColor: COLORS.primary.light,
+        borderColor: COLORS.primary.main,
+        shadowColor: COLORS.primary.main,
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
     },
     routeCardContent: {
+        gap: 12,
+    },
+    routeCardHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+    },
+    routeCodeContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-    },
-    routeCardIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: 'rgba(57, 160, 237, 0.08)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    routeCardInfo: {
-        flex: 1,
-    },
-    routeCardName: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: COLORS.text,
-        marginBottom: 4,
-        letterSpacing: -0.3,
+        gap: 8,
     },
     routeCardCode: {
-        fontSize: 13,
-        color: COLORS.primary,
-        fontWeight: '600',
-    },
-    routeCardMeta: {
-        alignItems: 'flex-end',
-    },
-    routeCardFare: {
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: '700',
-        color: COLORS.success,
-        marginBottom: 6,
+        color: COLORS.text.primary,
     },
-    routeCardRating: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    routeTypeTag: {
         paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
+        paddingVertical: 2,
+        borderRadius: 6,
+        backgroundColor: COLORS.border.light,
     },
-    routeCardRatingText: {
-        fontSize: 12,
-        color: COLORS.warning,
-        fontWeight: '600',
-        marginLeft: 4,
-    },
-    // Enhanced Route Info Panel - Fixed to use scaleY
-    routeInfoContainer: {
-        position: 'absolute',
-        bottom: 0.25 * height, // Positioned above bottom sheet
-        left: 20,
-        right: 20,
-        backgroundColor: COLORS.surface,
-        borderRadius: 28,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -8 },
-        shadowOpacity: 0.2,
-        shadowRadius: 30,
-        elevation: 25,
-        overflow: 'hidden',
-        zIndex: 99,
-        maxHeight: 0.55 * height,
-        minHeight: 200, // Minimum height when scaled down
-        transformOrigin: 'bottom center', // Scale from bottom
-    },
-    infoBridge: {
-        position: 'absolute',
-        top: -12,
-        left: '50%',
-        marginLeft: -24,
-        width: 48,
-        height: 12,
-        backgroundColor: COLORS.surface,
-        borderTopLeftRadius: 12,
-        borderTopRightRadius: 12,
-    },
-    routeInfoContent: {
-        flex: 1,
-        padding: 24,
-    },
-    routeInfoHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 24,
-        paddingTop: 8,
-    },
-    backButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: COLORS.subtle,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    routeInfoTitle: {
-        fontSize: 18,
+    routeTypeText: {
+        fontSize: 10,
         fontWeight: '700',
-        color: COLORS.text,
     },
-    routeInfoMain: {
+    routeDetails: {
+        flexDirection: 'row',
+        gap: 16,
+    },
+    detailItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 32,
+        gap: 4,
     },
-    routeIconLarge: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: COLORS.primaryLight,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 20,
-    },
-    routeInfoText: {
-        flex: 1,
-    },
-    routeNameLarge: {
-        fontSize: 22,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: 6,
-        lineHeight: 28,
-    },
-    routeCodeLarge: {
-        fontSize: 16,
-        color: COLORS.primary,
-        fontWeight: '600',
-    },
-    quickStats: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: COLORS.subtle,
-        borderRadius: 20,
-        padding: 20,
-        marginBottom: 24,
-    },
-    statItem: {
-        alignItems: 'center',
-        flex: 1,
-    },
-    statLabel: {
-        fontSize: 12,
-        color: COLORS.textMuted,
-        marginTop: 6,
-        marginBottom: 4,
+    detailText: {
+        fontSize: 13,
+        color: COLORS.text.secondary,
         fontWeight: '500',
     },
-    statValue: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: COLORS.text,
-    },
-    statDivider: {
-        width: 1,
-        height: 40,
-        backgroundColor: COLORS.border,
-    },
-    fareSection: {
-        backgroundColor: 'rgba(57, 160, 237, 0.05)',
-        borderRadius: 20,
-        padding: 24,
-        marginBottom: 24,
-    },
-    fareLabel: {
-        fontSize: 14,
-        color: COLORS.textMuted,
-        fontWeight: '500',
-        marginBottom: 8,
-    },
-    fareValue: {
-        fontSize: 32,
-        fontWeight: '800',
-        color: COLORS.primary,
-    },
-    navigateButton: {
+    routeCardFooter: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: COLORS.primary,
-        paddingVertical: 20,
-        paddingHorizontal: 24,
-        borderRadius: 20,
-        shadowColor: COLORS.primary,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
-        elevation: 8,
+        gap: 16,
     },
-    navigateButtonText: {
-        color: COLORS.textLight,
-        fontSize: 18,
-        fontWeight: '700',
-        marginHorizontal: 12,
+    footerItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
     },
-    navigateIcon: {
-        opacity: 0.9,
+    footerText: {
+        fontSize: 13,
+        color: COLORS.text.tertiary,
+        fontWeight: '500',
     },
     // Empty State
     emptyState: {
         alignItems: 'center',
         paddingVertical: 60,
+        paddingHorizontal: 40,
     },
     emptyTitle: {
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: '600',
-        color: COLORS.text,
-        marginTop: 20,
+        color: COLORS.text.primary,
+        marginTop: 16,
         marginBottom: 8,
     },
     emptyText: {
-        fontSize: 15,
-        color: COLORS.textMuted,
+        fontSize: 14,
+        color: COLORS.text.secondary,
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: 20,
+        marginBottom: 24,
+    },
+    retryButton: {
+        backgroundColor: COLORS.primary.light,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 12,
+    },
+    retryButtonText: {
+        color: COLORS.primary.main,
+        fontWeight: '600',
+        fontSize: 14,
     },
 });

@@ -1,4 +1,4 @@
-// app/_layout.tsx
+// app/_layout.jsx
 import { Stack } from 'expo-router';
 import AuthProvider from '../providers/AuthProvider';
 
