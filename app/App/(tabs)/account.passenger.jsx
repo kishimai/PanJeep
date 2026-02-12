@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+// account.passenger.js
+import { useRef, useEffect } from "react";
 import {
     View,
     Text,
@@ -6,59 +7,59 @@ import {
     TouchableOpacity,
     ScrollView,
     Alert,
-    Dimensions,
     Platform,
+    Animated,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { router } from "expo-router";
 import { useAuth } from '../../providers/AuthProvider';
 import { Feather } from "@expo/vector-icons";
-import Animated, {
-    FadeInDown,
-    FadeIn,
-    SlideInRight,
-    useAnimatedStyle,
-    withSpring,
-    useSharedValue,
-    withTiming
-} from "react-native-reanimated";
 
-const { width } = Dimensions.get("window");
-
-// Soft color palette
 const COLORS = {
-    primary: "#3B82F6",
-    background: "#F8FAFC",
+    primary: "#39A0ED",
+    background: "#FFFFFF",
+    surface: "#F9FAFB",
     text: {
-        primary: "#1E293B",
-        secondary: "#64748B",
-        tertiary: "#94A3B8",
-        light: "#FFFFFF",
+        primary: "#111827",
+        secondary: "#6B7280",
+        tertiary: "#9CA3AF",
     },
-    surface: "#FFFFFF",
     accent: "#10B981",
-    status: {
-        success: "#10B981",
-        warning: "#F59E0B",
-        error: "#EF4444",
-    }
+    warning: "#F59E0B",
+    error: "#EF4444",
 };
-
-const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
-const AnimatedView = Animated.createAnimatedComponent(View);
 
 export default function PassengerAccount() {
     const { session } = useAuth();
-    const [loading, setLoading] = useState(false);
-    const [userData] = useState({
+    const isGuest = !session;
+
+    const userData = {
         points: 847,
         streak: 5,
         level: 2,
         trips: 47,
-        joinedDate: "Jan 15, 2024",
-    });
+    };
 
-    const handleSignOut = async () => {
+    // Simple entry animation
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const slideAnim = useRef(new Animated.Value(20)).current;
+
+    useEffect(() => {
+        Animated.parallel([
+            Animated.timing(fadeAnim, {
+                toValue: 1,
+                duration: 600,
+                useNativeDriver: true,
+            }),
+            Animated.timing(slideAnim, {
+                toValue: 0,
+                duration: 600,
+                useNativeDriver: true,
+            }),
+        ]).start();
+    }, []);
+
+    const handleSignOut = () => {
         Alert.alert(
             "Sign Out",
             "Are you sure you want to sign out?",
@@ -68,7 +69,6 @@ export default function PassengerAccount() {
                     text: "Sign Out",
                     style: "destructive",
                     onPress: async () => {
-                        setLoading(true);
                         await supabase.auth.signOut();
                         router.replace("/login");
                     }
@@ -77,294 +77,248 @@ export default function PassengerAccount() {
         );
     };
 
-    // Guest state components
-    if (!session) {
+    // ------------------- Guest View -------------------
+    if (isGuest) {
         return (
             <View style={styles.container}>
                 <ScrollView
-                    contentContainerStyle={styles.guestContainer}
+                    contentContainerStyle={styles.guestScroll}
                     showsVerticalScrollIndicator={false}
                 >
-                    <AnimatedView
-                        entering={FadeIn.delay(100)}
-                        style={styles.guestContent}
+                    <Animated.View
+                        style={[
+                            styles.guestContent,
+                            {
+                                opacity: fadeAnim,
+                                transform: [{ translateY: slideAnim }]
+                            }
+                        ]}
                     >
-                        <View style={styles.guestIllustration}>
-                            <View style={styles.illustrationCircle}>
-                                <Feather name="user" size={48} color={COLORS.primary} />
-                            </View>
+                        <View style={styles.guestIcon}>
+                            <Feather name="user" size={40} color={COLORS.primary} />
                         </View>
-
-                        <AnimatedView entering={FadeInDown.delay(200)}>
-                            <Text style={styles.guestTitle}>Welcome to Lakbay</Text>
-                            <Text style={styles.guestSubtitle}>
-                                Sign in to access your account, track trips, and earn rewards.
-                            </Text>
-                        </AnimatedView>
-
-                        <AnimatedView entering={FadeInDown.delay(300)} style={styles.guestActions}>
-                            <TouchableOpacity
-                                style={[styles.button, styles.primaryButton]}
-                                onPress={() => router.push("/login")}
-                                activeOpacity={0.9}
-                            >
-                                <Feather name="log-in" size={20} color="#FFFFFF" />
-                                <Text style={styles.primaryButtonText}>Sign In</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.button, styles.secondaryButton]}
-                                onPress={() => router.push("/register")}
-                                activeOpacity={0.9}
-                            >
-                                <Text style={styles.secondaryButtonText}>Create Account</Text>
-                            </TouchableOpacity>
-                        </AnimatedView>
+                        <Text style={styles.guestTitle}>Welcome to Lakbay</Text>
+                        <Text style={styles.guestSubtitle}>
+                            Sign in to track trips, earn rewards, and save routes.
+                        </Text>
 
                         <TouchableOpacity
-                            style={styles.backButton}
-                            onPress={() => router.back()}
-                            activeOpacity={0.7}
+                            style={[styles.button, styles.primaryButton]}
+                            onPress={() => router.push("/login")}
+                            activeOpacity={0.8}
+                        >
+                            <Feather name="log-in" size={18} color="#FFF" />
+                            <Text style={styles.primaryButtonText}>Sign In</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.button, styles.secondaryButton]}
+                            onPress={() => router.push("/register")}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.secondaryButtonText}>Create Account</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.backLink}
+                            onPress={() => router.push("/home.passenger")}
                         >
                             <Feather name="chevron-left" size={16} color={COLORS.text.secondary} />
-                            <Text style={styles.backButtonText}>Back to Home</Text>
+                            <Text style={styles.backLinkText}>Back to Home</Text>
                         </TouchableOpacity>
-                    </AnimatedView>
+                    </Animated.View>
                 </ScrollView>
             </View>
         );
     }
 
+    // ------------------- Authenticated View -------------------
     return (
         <View style={styles.container}>
             <ScrollView
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}
             >
-                {/* Header */}
-                <AnimatedView
-                    entering={FadeInDown.duration(400)}
-                    style={styles.header}
+                {/* Header: home + level badge */}
+                <Animated.View
+                    style={[
+                        styles.header,
+                        {
+                            opacity: fadeAnim,
+                            transform: [{ translateY: slideAnim }]
+                        }
+                    ]}
                 >
-                    <View style={styles.userInfo}>
-                        <View style={styles.emailContainer}>
-                            <Feather name="mail" size={14} color={COLORS.text.tertiary} />
-                            <Text style={styles.email} numberOfLines={1}>
-                                {session.user.email}
-                            </Text>
-                        </View>
-                        <Text style={styles.memberSince}>
-                            Member since {userData.joinedDate}
-                        </Text>
-                    </View>
-
+                    <TouchableOpacity
+                        style={styles.homeButton}
+                        onPress={() => router.push("/home.passenger")}
+                        activeOpacity={0.7}
+                    >
+                        <Feather name="home" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
                     <View style={styles.levelBadge}>
                         <Text style={styles.levelText}>Lvl {userData.level}</Text>
                     </View>
-                </AnimatedView>
+                </Animated.View>
 
-                {/* Stats Cards */}
-                <AnimatedView
-                    entering={SlideInRight.delay(100)}
-                    style={styles.statsGrid}
+                {/* Stats Cards – unified numbers */}
+                <Animated.View
+                    style={[
+                        styles.statsGrid,
+                        {
+                            opacity: fadeAnim,
+                            transform: [{ translateY: slideAnim }]
+                        }
+                    ]}
                 >
-                    <StatCard
-                        icon="star"
-                        value={userData.points}
-                        label="Points"
-                        color={COLORS.primary}
-                    />
-                    <StatCard
-                        icon="zap"
-                        value={userData.streak}
-                        label="Day Streak"
-                        color={COLORS.status.warning}
-                    />
-                    <StatCard
-                        icon="navigation"
-                        value={userData.trips}
-                        label="Trips"
-                        color={COLORS.accent}
-                    />
-                </AnimatedView>
+                    <View style={styles.statCard}>
+                        <Feather name="star" size={18} color={COLORS.primary} />
+                        <Text style={styles.statValue}>{userData.points}</Text>
+                        <Text style={styles.statLabel}>Points</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                        <Feather name="zap" size={18} color={COLORS.warning} />
+                        <Text style={styles.statValue}>{userData.streak}</Text>
+                        <Text style={styles.statLabel}>Day streak</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                        <Feather name="navigation" size={18} color={COLORS.accent} />
+                        <Text style={styles.statValue}>{userData.trips}</Text>
+                        <Text style={styles.statLabel}>Trips</Text>
+                    </View>
+                </Animated.View>
 
-                {/* Quick Actions - Smaller buttons */}
-                <AnimatedView
-                    entering={FadeInDown.delay(200)}
-                    style={styles.section}
+                {/* Quick Actions – no Profile */}
+                <Animated.View
+                    style={[
+                        styles.section,
+                        {
+                            opacity: fadeAnim,
+                            transform: [{ translateY: slideAnim }]
+                        }
+                    ]}
                 >
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionsGrid}>
-                        <SmallActionButton
-                            icon="user"
-                            label="Profile"
-                            onPress={() => router.push("/profile")}
-                            color={COLORS.primary}
-                        />
-                        <SmallActionButton
+                        <ActionButton
                             icon="award"
                             label="Rewards"
                             onPress={() => router.push("/rewards")}
-                            color={COLORS.status.warning}
+                            color={COLORS.warning}
                         />
-                        <SmallActionButton
+                        <ActionButton
                             icon="settings"
                             label="Settings"
                             onPress={() => router.push("/settings")}
                             color={COLORS.text.secondary}
                         />
-                        <SmallActionButton
+                        <ActionButton
                             icon="help-circle"
                             label="Help"
                             onPress={() => router.push("/help")}
                             color={COLORS.text.secondary}
                         />
                     </View>
-                </AnimatedView>
+                </Animated.View>
 
-                {/* Recent Activity */}
-                <AnimatedView
-                    entering={FadeInDown.delay(300)}
-                    style={styles.section}
+                {/* Recent Activity – now styled like route cards */}
+                <Animated.View
+                    style={[
+                        styles.section,
+                        {
+                            opacity: fadeAnim,
+                            transform: [{ translateY: slideAnim }]
+                        }
+                    ]}
                 >
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Recent Activity</Text>
                         <TouchableOpacity>
-                            <Text style={styles.seeAllText}>See all</Text>
+                            <Text style={styles.seeAll}>See all</Text>
                         </TouchableOpacity>
                     </View>
-
                     <View style={styles.activityList}>
-                        <ActivityItem
+                        <ActivityCard
                             icon="map-pin"
                             title="Saved new route"
                             time="2 hours ago"
                             points={10}
                         />
-                        <ActivityItem
+                        <ActivityCard
                             icon="navigation"
                             title="Trip completed"
                             time="Yesterday"
                             points={25}
                         />
-                        <ActivityItem
+                        <ActivityCard
                             icon="star"
                             title="Level up!"
                             time="3 days ago"
                             points={50}
                         />
                     </View>
-                </AnimatedView>
+                </Animated.View>
 
-                {/* Sign Out Button */}
-                <AnimatedView
-                    entering={FadeInDown.delay(400)}
-                    style={styles.footer}
+                {/* Sign Out & Version */}
+                <Animated.View
+                    style={[
+                        styles.footer,
+                        {
+                            opacity: fadeAnim,
+                            transform: [{ translateY: slideAnim }]
+                        }
+                    ]}
                 >
                     <TouchableOpacity
                         style={styles.signOutButton}
                         onPress={handleSignOut}
-                        disabled={loading}
                         activeOpacity={0.8}
                     >
-                        {loading ? (
-                            <View style={styles.loadingContainer}>
-                                <View style={styles.loadingDot} />
-                                <View style={styles.loadingDot} />
-                                <View style={styles.loadingDot} />
-                            </View>
-                        ) : (
-                            <>
-                                <Feather name="log-out" size={18} color={COLORS.status.error} />
-                                <Text style={styles.signOutText}>Sign Out</Text>
-                            </>
-                        )}
+                        <Feather name="log-out" size={18} color={COLORS.error} />
+                        <Text style={styles.signOutText}>Sign Out</Text>
                     </TouchableOpacity>
-
-                    <Text style={styles.versionText}>Lakbay v1.0</Text>
-                </AnimatedView>
+                    <Text style={styles.version}>Lakbay v1.0</Text>
+                </Animated.View>
             </ScrollView>
         </View>
     );
 }
 
-// Reusable Components
-const StatCard = ({ icon, value, label, color }) => {
-    const scale = useSharedValue(1);
+// ----- Inline components -----
 
-    const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }]
-    }));
-
-    return (
-        <AnimatedTouchable
-            style={[styles.statCard, animatedStyle]}
-            activeOpacity={0.9}
-            onPressIn={() => {
-                scale.value = withSpring(0.95);
-            }}
-            onPressOut={() => {
-                scale.value = withSpring(1);
-            }}
-        >
-            <Feather name={icon} size={20} color={color} />
-            <Text style={[styles.statValue, { color }]}>{value}</Text>
-            <Text style={styles.statLabel}>{label}</Text>
-        </AnimatedTouchable>
-    );
-};
-
-const SmallActionButton = ({ icon, label, onPress, color }) => {
-    const scale = useSharedValue(1);
-
-    const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }]
-    }));
-
-    return (
-        <AnimatedTouchable
-            style={[styles.smallActionButton, animatedStyle]}
-            onPress={onPress}
-            activeOpacity={0.9}
-            onPressIn={() => {
-                scale.value = withSpring(0.95);
-            }}
-            onPressOut={() => {
-                scale.value = withSpring(1);
-            }}
-        >
-            <View style={[styles.smallActionIcon, { backgroundColor: `${color}10` }]}>
-                <Feather name={icon} size={18} color={color} />
-            </View>
-            <Text style={styles.smallActionLabel}>{label}</Text>
-        </AnimatedTouchable>
-    );
-};
-
-const ActivityItem = ({ icon, title, time, points }) => {
-    return (
-        <View style={styles.activityItem}>
-            <View style={styles.activityIcon}>
-                <Feather name={icon} size={16} color={COLORS.text.secondary} />
-            </View>
-            <View style={styles.activityContent}>
-                <Text style={styles.activityTitle}>{title}</Text>
-                <Text style={styles.activityTime}>{time}</Text>
-            </View>
-            <View style={styles.pointsBadge}>
-                <Text style={styles.pointsText}>+{points}</Text>
-            </View>
+const ActionButton = ({ icon, label, onPress, color }) => (
+    <TouchableOpacity style={styles.actionButton} onPress={onPress} activeOpacity={0.7}>
+        <View style={[styles.actionIcon, { backgroundColor: `${color}10` }]}>
+            <Feather name={icon} size={18} color={color} />
         </View>
-    );
-};
+        <Text style={styles.actionLabel}>{label}</Text>
+    </TouchableOpacity>
+);
+
+// ActivityCard – mimics the "Routes Near You" card layout
+const ActivityCard = ({ icon, title, time, points }) => (
+    <View style={styles.activityCard}>
+        <View style={styles.activityBadge}>
+            <Feather name={icon} size={18} color={COLORS.primary} />
+        </View>
+        <View style={styles.activityInfo}>
+            <Text style={styles.activityTitle}>{title}</Text>
+            <Text style={styles.activityTime}>{time}</Text>
+        </View>
+        <View style={styles.pointsTag}>
+            <Text style={styles.pointsText}>+{points}</Text>
+        </View>
+    </View>
+);
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: COLORS.background,
     },
-    // Guest View
-    guestContainer: {
+
+    // --- Guest ---
+    guestScroll: {
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 24,
@@ -373,16 +327,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 40,
     },
-    guestIllustration: {
-        marginBottom: 32,
-    },
-    illustrationCircle: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
+    guestIcon: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
         backgroundColor: `${COLORS.primary}10`,
         justifyContent: 'center',
         alignItems: 'center',
+        marginBottom: 24,
     },
     guestTitle: {
         fontSize: 28,
@@ -396,21 +348,19 @@ const styles = StyleSheet.create({
         color: COLORS.text.secondary,
         textAlign: 'center',
         lineHeight: 24,
-        marginBottom: 40,
-        maxWidth: 300,
-    },
-    guestActions: {
-        width: '100%',
-        gap: 12,
         marginBottom: 32,
+        maxWidth: 280,
     },
     button: {
-        height: 56,
-        borderRadius: 14,
+        height: 52,
+        borderRadius: 12,
         justifyContent: 'center',
         alignItems: 'center',
         flexDirection: 'row',
-        gap: 10,
+        gap: 8,
+        paddingHorizontal: 24,
+        width: '100%',
+        marginBottom: 12,
     },
     primaryButton: {
         backgroundColor: COLORS.primary,
@@ -422,25 +372,27 @@ const styles = StyleSheet.create({
     },
     secondaryButton: {
         backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.primary + '20',
     },
     secondaryButtonText: {
         color: COLORS.text.primary,
         fontSize: 16,
         fontWeight: '600',
     },
-    backButton: {
+    backLink: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingVertical: 12,
-        paddingHorizontal: 16,
+        gap: 6,
+        marginTop: 16,
+        paddingVertical: 8,
     },
-    backButtonText: {
+    backLinkText: {
         fontSize: 15,
         color: COLORS.text.secondary,
-        fontWeight: '500',
     },
-    // Logged In View
+
+    // --- Authenticated ---
     scrollContent: {
         paddingTop: Platform.OS === 'ios' ? 60 : 40,
         paddingBottom: 40,
@@ -448,72 +400,63 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        paddingHorizontal: 24,
+        alignItems: 'center',
+        paddingHorizontal: 20,
         paddingBottom: 24,
     },
-    userInfo: {
-        flex: 1,
-    },
-    emailContainer: {
-        flexDirection: 'row',
+    homeButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: `${COLORS.primary}10`,
         alignItems: 'center',
-        gap: 8,
-        marginBottom: 6,
-    },
-    email: {
-        fontSize: 16,
-        color: COLORS.text.primary,
-        fontWeight: '500',
-    },
-    memberSince: {
-        fontSize: 14,
-        color: COLORS.text.tertiary,
+        justifyContent: 'center',
     },
     levelBadge: {
         backgroundColor: `${COLORS.primary}10`,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16,
     },
     levelText: {
         fontSize: 13,
         fontWeight: '600',
         color: COLORS.primary,
     },
+
+    // Stats – cleaner, numbers in neutral color
     statsGrid: {
         flexDirection: 'row',
-        paddingHorizontal: 24,
-        paddingVertical: 8,
+        paddingHorizontal: 20,
+        paddingBottom: 16,
         gap: 12,
     },
     statCard: {
         flex: 1,
         backgroundColor: COLORS.surface,
-        borderRadius: 20,
-        padding: 20,
+        borderRadius: 16,
+        paddingVertical: 14,
+        paddingHorizontal: 8,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.02)',
     },
     statValue: {
-        fontSize: 24,
+        fontSize: 20,
         fontWeight: '700',
-        marginTop: 8,
-        marginBottom: 4,
+        color: COLORS.text.primary,
+        marginTop: 6,
+        marginBottom: 2,
     },
     statLabel: {
         fontSize: 12,
         color: COLORS.text.secondary,
         fontWeight: '500',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
     },
+
+    // Sections
     section: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 20,
         marginTop: 24,
     },
     sectionHeader: {
@@ -527,92 +470,91 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: COLORS.text.primary,
     },
-    seeAllText: {
+    seeAll: {
         fontSize: 14,
         color: COLORS.primary,
         fontWeight: '500',
     },
+
+    // Quick Actions – three buttons, flex:1
     actionsGrid: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
         gap: 12,
     },
-    smallActionButton: {
-        width: (width - 72) / 4,
+    actionButton: {
+        flex: 1,
         backgroundColor: COLORS.surface,
-        borderRadius: 16,
-        paddingVertical: 16,
+        borderRadius: 14,
+        paddingVertical: 14,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 3,
-        elevation: 1,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.02)',
     },
-    smallActionIcon: {
+    actionIcon: {
         width: 40,
         height: 40,
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 6,
     },
-    smallActionLabel: {
+    actionLabel: {
         fontSize: 12,
         fontWeight: '600',
         color: COLORS.text.primary,
-        textAlign: 'center',
     },
+
+    // Activity list – route card style
     activityList: {
         gap: 8,
     },
-    activityItem: {
+    activityCard: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: COLORS.surface,
-        borderRadius: 16,
-        padding: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 3,
-        elevation: 1,
+        borderRadius: 14,
+        paddingVertical: 16,
+        paddingHorizontal: 20,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.02)',
     },
-    activityIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: `${COLORS.background}`,
-        justifyContent: 'center',
+    activityBadge: {
+        minWidth: 44,
         alignItems: 'center',
-        marginRight: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        backgroundColor: `${COLORS.primary}10`,
+        borderRadius: 8,
     },
-    activityContent: {
+    activityInfo: {
         flex: 1,
+        marginLeft: 16,
     },
     activityTitle: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: '600',
         color: COLORS.text.primary,
-        marginBottom: 2,
+        marginBottom: 4,
     },
     activityTime: {
-        fontSize: 13,
-        color: COLORS.text.tertiary,
+        fontSize: 14,
+        color: COLORS.text.secondary,
     },
-    pointsBadge: {
-        backgroundColor: `${COLORS.status.warning}10`,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 12,
+    pointsTag: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        backgroundColor: `${COLORS.warning}10`,
+        borderRadius: 6,
     },
     pointsText: {
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '700',
-        color: COLORS.status.warning,
+        color: COLORS.warning,
     },
+
+    // Footer
     footer: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 20,
         marginTop: 32,
         alignItems: 'center',
     },
@@ -621,30 +563,21 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         width: '100%',
-        padding: 18,
-        backgroundColor: `${COLORS.status.error}05`,
-        borderRadius: 16,
-        gap: 10,
-        marginBottom: 24,
+        padding: 16,
+        backgroundColor: `${COLORS.error}08`,
+        borderRadius: 14,
+        gap: 8,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: `${COLORS.error}20`,
     },
     signOutText: {
         fontSize: 16,
         fontWeight: '600',
-        color: COLORS.status.error,
+        color: COLORS.error,
     },
-    loadingContainer: {
-        flexDirection: 'row',
-        gap: 6,
-    },
-    loadingDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: COLORS.status.error,
-    },
-    versionText: {
+    version: {
         fontSize: 13,
         color: COLORS.text.tertiary,
-        fontWeight: '500',
     },
 });

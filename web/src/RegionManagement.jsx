@@ -303,6 +303,19 @@ export function RegionManagement({ onRegionSelect }) {
     }, [selectedHierarchy]);
 
     const deleteRegion = async (regionId) => {
+        const { count, error: countError } = await supabase
+            .from('routes')
+            .select('*', { count: 'exact', head: true })
+            .eq('region_id', regionId)
+            .is('deleted_at', null);
+
+        if (countError) throw countError;
+
+        if (count > 0) {
+            alert(`Cannot delete region – ${count} route(s) still assigned.`);
+            return;
+        }
+
         try {
             const { error } = await supabase
                 .from('regions')

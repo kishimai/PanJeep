@@ -5,18 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="54f70619-1484-4ec8-bcea-9b5e10d4fc19" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/App/mapDirections.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/components/passenger/constants.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/components/passenger/hooks/useRouteData.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/components/passenger/utils.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/(tabs)/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/_layout.jsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/account.passenger.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/_layout.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.json" beforeDir="false" afterPath="$PROJECT_DIR$/app.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/useProfile.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/lib/useProfile.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../web/src/RouteManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/../web/src/RouteManager.jsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -67,13 +63,16 @@
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_interpreter_path&quot;: &quot;C:/Users/Guest1/AppData/Roaming/JetBrains/WebStorm2025.3/node/versions/20.15.0/node&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;settings.javascript.runtime&quot;,
     &quot;ts.external.directory.path&quot;: &quot;C:\\Users\\Guest1\\Desktop\\Projects\\PanJeep\\app\\node_modules\\typescript\\lib&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\Guest1\Desktop\Projects\PanJeep\app\components\passenger\hooks" />
       <recent name="C:\Users\Guest1\Desktop\Projects\PanJeep\app" />
     </key>
   </component>
@@ -101,6 +100,14 @@
       <workItem from="1770647393221" duration="17306000" />
       <workItem from="1770706179252" duration="7519000" />
       <workItem from="1770726510608" duration="19471000" />
+      <workItem from="1770761018756" duration="9183000" />
+      <workItem from="1770799472700" duration="692000" />
+      <workItem from="1770800602015" duration="441000" />
+      <workItem from="1770826516447" duration="661000" />
+      <workItem from="1770882279122" duration="6107000" />
+      <workItem from="1770891661536" duration="8508000" />
+      <workItem from="1770918592575" duration="56000" />
+      <workItem from="1770918706985" duration="10000" />
     </task>
     <servers />
   </component>

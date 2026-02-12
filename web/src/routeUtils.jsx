@@ -155,3 +155,16 @@ export const pointsToGPX = (points, name = "Route") => {
   </trk>
 </gpx>`;
 };
+
+export function isValidUUID(uuid) {
+    if (!uuid) return false;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
+}
+
+// Helper function for generating distinct route colors
+// Helper function for generating distinct route colors
+export const getRandomColor = () => {
+    const hue = Math.floor(Math.random() * 360);
+    return `hsl(${hue}, 70%, 55%)`;
+};

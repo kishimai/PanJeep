@@ -4,6 +4,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { RouteEditor } from "./RouteEditor.jsx";
 import { estimateLength } from "./routeUtils.jsx";
 import { supabase } from "./supabase";
+import { isValidUUID, getRandomColor } from './routeUtils.jsx';
 
 // Custom Hook: Mapbox Initialization
 const useMapbox = (containerRef) => {
@@ -26,7 +27,6 @@ const useMapbox = (containerRef) => {
             style: "mapbox://styles/mapbox/light-v11",
             center: [120.9842, 14.5995],
             zoom: 12,
-            minZoom: 10,
             maxZoom: 18,
             attributionControl: true,
             antialias: true,
@@ -122,16 +122,19 @@ const useRoutes = (regionFilter = '') => {
                 id: dbRoute.id,
                 name: dbRoute.geometry?.properties?.name || dbRoute.route_code,
                 code: dbRoute.route_code,
-                color: '#0066CC',
+                color: dbRoute.route_color || '#0066CC', // 👈 direct column
                 rawPoints: dbRoute.geometry?.coordinates || [],
-                snappedPoints: dbRoute.stops_snapshot?.coordinates || null,
                 regionId: dbRoute.region_id,
                 regionName: dbRoute.region?.name,
                 status: dbRoute.status,
                 length_meters: dbRoute.length_meters,
                 created_at: dbRoute.created_at,
                 updated_at: dbRoute.updated_at,
+                credit_status: dbRoute.credit_status,
                 credited_by_operator_id: dbRoute.credited_by_operator_id,
+                credited_at: dbRoute.credited_at,
+                credit_confidence: dbRoute.credit_confidence,
+                credit_reason: dbRoute.credit_reason,
             }));
 
             setRoutes(transformedRoutes);
@@ -266,9 +269,10 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
                 map.getSource(sourceId).setData(geojson);
 
                 // Update line appearance based on selection
-                map.setPaintProperty(lineId, 'line-color', selectedRouteId === route.id ? '#003366' : '#0066CC');
+                map.setPaintProperty(lineId, 'line-color', route.color || '#0066CC');
                 map.setPaintProperty(lineId, 'line-width', selectedRouteId === route.id ? 4 : 3);
                 map.setPaintProperty(lineId, 'line-opacity', selectedRouteId === route.id ? 1 : 0.8);
+
 
                 // Add event handlers
                 const handleClick = () => {
@@ -661,99 +665,129 @@ export function RouteManager({ operatorId }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('User not authenticated');
 
+            // Fetch existing route to detect status/credit changes
+            let existingRoute = null;
+            if (route.id && isValidUUID(route.id)) {
+                const { data } = await supabase
+                    .from('routes')
+                    .select('status, credit_status, credited_by_operator_id, credited_at')
+                    .eq('id', route.id)
+                    .single();
+                existingRoute = data;
+            }
+
             const routeData = {
                 route_code: route.code || `ROUTE_${Date.now()}`,
-                origin_type: 'system',
-                proposed_by_user_id: user.id,
-                credited_by_operator_id: user.id, // ADD THIS LINE
+                origin_type: route.origin_type || 'field',
+                proposed_by_user_id: route.proposed_by_user_id || user.id,
                 status: route.status || 'draft',
+                route_color: route.color || '#0066CC',
                 geometry: {
                     type: 'LineString',
-                    coordinates: route.rawPoints,
+                    coordinates: route.rawPoints || [],
                     properties: {
-                        color: '#0066CC',
-                        name: route.name || route.code
+                        color: route.color || '#0066CC',
+                        name: route.name || route.code || 'Unnamed Route',
+                        ...(route.geometry?.properties || {})
                     }
                 },
-                stops_snapshot: route.snappedPoints ? {
-                    type: 'LineString',
-                    coordinates: route.snappedPoints
-                } : null,
-                length_meters: Math.round(estimateLength(route.rawPoints) * 1000),
+                length_meters: Math.round((route.rawPoints?.length > 1 ? estimateLength(route.rawPoints) : 0) * 1000),
                 last_geometry_update_at: new Date().toISOString(),
                 region_id: route.regionId || null,
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                // Credit fields
+                credit_status: route.credit_status || 'uncredited',
+                credit_confidence: route.credit_confidence || 0,
+                credit_reason: route.credit_reason || null
             };
 
-            let result;
+            // ---- Credit granting logic ----
+            if (route.credit_status === 'credited') {
+                if (!existingRoute?.credited_by_operator_id || existingRoute.credit_status !== 'credited') {
+                    routeData.credited_by_operator_id = user.id;
+                    routeData.credited_at = new Date().toISOString();
+                    routeData.credit_confidence = 1.0;
+                    routeData.credit_reason = route.credit_reason || 'Credited via route editor';
+                } else {
+                    routeData.credited_by_operator_id = existingRoute.credited_by_operator_id;
+                    routeData.credited_at = existingRoute.credited_at;
+                    routeData.credit_confidence = existingRoute.credit_confidence || 1.0;
+                    routeData.credit_reason = route.credit_reason || existingRoute.credit_reason;
+                }
+            } else if (route.credit_status === 'credit_revoked') {
+                routeData.credited_by_operator_id = null;
+                routeData.credited_at = null;
+                routeData.credit_confidence = 0;
+                routeData.credit_reason = route.credit_reason || 'Credit revoked';
+            } else { // uncredited
+                routeData.credited_by_operator_id = null;
+                routeData.credited_at = null;
+                routeData.credit_confidence = 0;
+                routeData.credit_reason = null;
+            }
 
+            // ---- Status change tracking ----
+            if (route.status && (!existingRoute || existingRoute.status !== route.status)) {
+                routeData.status_changed_at = new Date().toISOString();
+                routeData.status_changed_by = user.id;
+            }
+
+            let result;
             if (route.id && isValidUUID(route.id)) {
                 const { data, error } = await supabase
                     .from('routes')
                     .update(routeData)
                     .eq('id', route.id)
-                    .select(`
-            *,
-            region:region_id (
-              region_id,
-              name,
-              code
-            )
-          `)
+                    .select('*, region:region_id(*)')
                     .single();
-
                 if (error) throw error;
                 result = data;
             } else {
                 const { data, error } = await supabase
                     .from('routes')
-                    .insert([routeData])
-                    .select(`
-            *,
-            region:region_id (
-              region_id,
-              name,
-              code
-            )
-          `)
+                    .insert([{ ...routeData, created_at: new Date().toISOString() }])
+                    .select('*, region:region_id(*)')
                     .single();
-
                 if (error) throw error;
                 result = data;
             }
 
-            // Update the local state immediately
+            // Transform and update local state
             const updatedRoute = {
                 id: result.id,
                 name: result.geometry?.properties?.name || result.route_code,
                 code: result.route_code,
-                color: '#0066CC',
+                color: result.geometry?.properties?.color || '#0066CC',
                 rawPoints: result.geometry?.coordinates || [],
-                snappedPoints: result.stops_snapshot?.coordinates || null,
                 regionId: result.region_id,
                 regionName: result.region?.name,
                 status: result.status,
                 length_meters: result.length_meters,
                 created_at: result.created_at,
-                updated_at: result.updated_at
+                updated_at: result.updated_at,
+                credit_status: result.credit_status,
+                credited_by_operator_id: result.credited_by_operator_id,
+                credited_at: result.credited_at,
+                credit_confidence: result.credit_confidence,
+                credit_reason: result.credit_reason,
+                status_changed_at: result.status_changed_at,
+                status_changed_by: result.status_changed_by
             };
 
             setRoutes(prev => {
-                const existingIndex = prev.findIndex(r => r.id === result.id);
-                if (existingIndex >= 0) {
+                const idx = prev.findIndex(r => r.id === result.id);
+                if (idx >= 0) {
                     const newRoutes = [...prev];
-                    newRoutes[existingIndex] = updatedRoute;
+                    newRoutes[idx] = updatedRoute;
                     return newRoutes;
-                } else {
-                    return [updatedRoute, ...prev];
                 }
+                return [updatedRoute, ...prev];
             });
 
             return result;
         } catch (error) {
             console.error('Error saving route:', error);
-            alert(`Failed to save route: ${error.message}`);
-            throw error;
+            throw new Error(error.message);
         }
     }, []);
 
@@ -818,69 +852,109 @@ export function RouteManager({ operatorId }) {
 
     const duplicateRoute = useCallback(async (routeId) => {
         const route = routes.find(r => r.id === routeId);
-        if (!route) return;
+        if (!route) {
+            alert('Route not found');
+            return;
+        }
 
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('User not authenticated');
 
-            const newRouteCode = `${route.code}-COPY`;
+            // Generate unique route code
+            let newRouteCode = `${route.code}-COPY`;
+            let counter = 1;
+            let codeExists = true;
+            while (codeExists) {
+                const { data: existing } = await supabase
+                    .from('routes')
+                    .select('route_code')
+                    .eq('route_code', newRouteCode)
+                    .maybeSingle();
+                if (!existing) {
+                    codeExists = false;
+                } else {
+                    counter++;
+                    newRouteCode = `${route.code}-COPY-${counter}`;
+                }
+            }
+
+            const duplicateColor = getRandomColor();
+
+            const routeData = {
+                route_code: newRouteCode,
+                origin_type: route.origin_type || 'field',
+                proposed_by_user_id: user.id,
+                status: 'draft',
+                route_color: route.color || '#0066CC',
+                geometry: {
+                    type: 'LineString',
+                    coordinates: route.rawPoints || [],
+                    properties: {
+                        color: duplicateColor,
+                        name: `${route.name || route.code} (Copy)`,
+                        original_route_id: route.id,
+                        duplicated_at: new Date().toISOString(),
+                        duplicated_by: user.id
+                    }
+                },
+                length_meters: route.length_meters || 0,
+                last_geometry_update_at: new Date().toISOString(),
+                region_id: route.regionId || null,
+                // Credit – fresh start
+                credit_status: 'uncredited',
+                credit_confidence: 0,
+                credit_reason: null,
+                credited_by_operator_id: null,
+                credited_at: null,
+                // Status tracking
+                status_changed_at: new Date().toISOString(),
+                status_changed_by: user.id
+            };
 
             const { data: newRoute, error } = await supabase
                 .from('routes')
-                .insert([{
-                    route_code: newRouteCode,
-                    origin_type: 'field',
-                    proposed_by_user_id: user.id,
-                    credited_by_operator_id: user.id, // ADD THIS LINE
-                    status: 'draft',
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: route.rawPoints,
-                        properties: {
-                            color: '#0066CC',
-                            name: `${route.name} (Copy)`
-                        }
-                    },
-                    length_meters: route.length_meters,
-                    region_id: route.regionId
-                }])
-                .select(`
-        *,
-        region:region_id (
-          region_id,
-          name,
-          code
-        )
-      `)
+                .insert([routeData])
+                .select('*, region:region_id(*)')
                 .single();
 
             if (error) throw error;
 
             const newEditorRoute = {
                 id: newRoute.id,
-                name: `${route.name} (Copy)`,
+                name: newRoute.geometry?.properties?.name || `${route.name} (Copy)`,
                 code: newRoute.route_code,
-                color: '#0066CC',
+                color: duplicateColor,
                 rawPoints: newRoute.geometry?.coordinates || [],
-                snappedPoints: newRoute.stops_snapshot?.coordinates || null,
                 regionId: newRoute.region_id,
                 regionName: newRoute.region?.name,
                 status: newRoute.status,
                 length_meters: newRoute.length_meters,
                 created_at: newRoute.created_at,
-                updated_at: newRoute.updated_at
+                updated_at: newRoute.updated_at,
+                credit_status: newRoute.credit_status,
+                credited_by_operator_id: newRoute.credited_by_operator_id,
+                credited_at: newRoute.credited_at,
+                credit_confidence: newRoute.credit_confidence,
+                credit_reason: newRoute.credit_reason,
+                original_route_id: route.id
             };
 
             setRoutes(prev => [newEditorRoute, ...prev]);
             setSelectedRouteId(newRoute.id);
             setActiveRouteId(newRoute.id);
+            alert(`Route duplicated as "${newEditorRoute.name}"`);
 
+            if (newEditorRoute.rawPoints.length > 0) {
+                zoomToRoute(newEditorRoute);
+            }
+
+            return newEditorRoute;
         } catch (error) {
             console.error('Error duplicating route:', error);
-            alert('Failed to duplicate route');
+            alert(`Failed to duplicate route: ${error.message}`);
         }
-    }, [routes]);
+    }, [routes, setRoutes, setSelectedRouteId, setActiveRouteId, zoomToRoute]);
 
     // Effects
     useEffect(() => {
@@ -902,11 +976,6 @@ export function RouteManager({ operatorId }) {
             clearAllRouteLayers();
         };
     }, [clearAllRouteLayers]);
-
-    function isValidUUID(uuid) {
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        return uuidRegex.test(uuid);
-    }
 
     const isLoading = isLoadingRoutes || isLoadingRegions;
 

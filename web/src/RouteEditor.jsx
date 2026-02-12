@@ -4,58 +4,74 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { estimateLength, clonePoints, simplifyRoute, validateCoordinate } from "./routeUtils.jsx";
 import { supabase } from "./supabase";
 
+// ----------------------------------------------------------------------
+// Euclidean distance between two points [lng, lat]
+// ----------------------------------------------------------------------
+const distance = (p1, p2) => {
+    const dx = p1[0] - p2[0];
+    const dy = p1[1] - p2[1];
+    return Math.sqrt(dx * dx + dy * dy);
+};
+
+// ----------------------------------------------------------------------
 // Custom Hook: Point Editing with History
+// ----------------------------------------------------------------------
 const usePointEditing = (initialPoints = []) => {
     const [points, setPoints] = useState(initialPoints);
     const [history, setHistory] = useState([initialPoints]);
     const [historyIndex, setHistoryIndex] = useState(0);
 
-    const saveToHistory = useCallback((newPoints) => {
-        setHistory(prev => {
-            const newHistory = prev.slice(0, historyIndex + 1);
-            newHistory.push([...newPoints]);
-            return newHistory;
-        });
-        setHistoryIndex(prev => prev + 1);
-    }, [historyIndex]);
+    const saveToHistory = useCallback(
+        (newPoints) => {
+            setHistory((prev) => {
+                const newHistory = prev.slice(0, historyIndex + 1);
+                newHistory.push([...newPoints]);
+                return newHistory;
+            });
+            setHistoryIndex((prev) => prev + 1);
+        },
+        [historyIndex]
+    );
 
-    const updatePoint = useCallback((index, lng, lat) => {
-        if (!validateCoordinate(lng, 'lng') || !validateCoordinate(lat, 'lat')) {
-            return;
-        }
+    const updatePoint = useCallback(
+        (index, lng, lat) => {
+            if (!validateCoordinate(lng, "lng") || !validateCoordinate(lat, "lat")) return;
+            const newPoints = [...points];
+            newPoints[index] = [parseFloat(lng), parseFloat(lat)];
+            setPoints(newPoints);
+            saveToHistory(newPoints);
+        },
+        [points, saveToHistory]
+    );
 
-        const newPoints = [...points];
-        newPoints[index] = [parseFloat(lng), parseFloat(lat)];
-        setPoints(newPoints);
-        saveToHistory(newPoints);
-    }, [points, saveToHistory]);
+    const addPoint = useCallback(
+        (lng, lat, insertAtIndex = -1) => {
+            if (!validateCoordinate(lng, "lng") || !validateCoordinate(lat, "lat")) return;
+            const newPoint = [parseFloat(lng), parseFloat(lat)];
+            let newPoints;
 
-    const addPoint = useCallback((lng, lat, index = -1) => {
-        if (!validateCoordinate(lng, 'lng') || !validateCoordinate(lat, 'lat')) {
-            return;
-        }
+            if (insertAtIndex === -1 || insertAtIndex >= points.length) {
+                newPoints = [...points, newPoint];
+            } else {
+                newPoints = [...points];
+                newPoints.splice(insertAtIndex, 0, newPoint);
+            }
 
-        const newPoint = [parseFloat(lng), parseFloat(lat)];
-        let newPoints;
+            setPoints(newPoints);
+            saveToHistory(newPoints);
+        },
+        [points, saveToHistory]
+    );
 
-        if (index === -1) {
-            newPoints = [...points, newPoint];
-        } else {
-            newPoints = [...points];
-            newPoints.splice(index + 1, 0, newPoint);
-        }
-
-        setPoints(newPoints);
-        saveToHistory(newPoints);
-    }, [points, saveToHistory]);
-
-    const deletePoint = useCallback((index) => {
-        if (points.length <= 1) return;
-
-        const newPoints = points.filter((_, i) => i !== index);
-        setPoints(newPoints);
-        saveToHistory(newPoints);
-    }, [points, saveToHistory]);
+    const deletePoint = useCallback(
+        (index) => {
+            if (points.length <= 1) return;
+            const newPoints = points.filter((_, i) => i !== index);
+            setPoints(newPoints);
+            saveToHistory(newPoints);
+        },
+        [points, saveToHistory]
+    );
 
     const clearPoints = useCallback(() => {
         setPoints([]);
@@ -95,17 +111,19 @@ const usePointEditing = (initialPoints = []) => {
         redo,
         resetPoints,
         canUndo: historyIndex > 0,
-        canRedo: historyIndex < history.length - 1
+        canRedo: historyIndex < history.length - 1,
     };
 };
 
-// Custom Hook: Route Visualization
-const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
+// ----------------------------------------------------------------------
+// Custom Hook: Route Visualization (uses routeColor prop)
+// ----------------------------------------------------------------------
+const useRouteVisualization = (map, points, activeRouteId, updatePoint, routeColor = "#0066CC") => {
     const markersRef = useRef([]);
     const polylineLayerId = useRef(null);
 
     const clearVisuals = useCallback(() => {
-        markersRef.current.forEach(marker => marker?.remove?.());
+        markersRef.current.forEach((marker) => marker?.remove?.());
         markersRef.current = [];
 
         if (map && polylineLayerId.current) {
@@ -118,7 +136,7 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
                     map.removeSource(sourceId);
                 }
             } catch (error) {
-                console.warn('Error clearing map layers:', error);
+                console.warn("Error clearing map layers:", error);
             }
             polylineLayerId.current = null;
         }
@@ -130,24 +148,21 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
             return;
         }
 
-        // Clear existing markers
-        markersRef.current.forEach(marker => marker?.remove?.());
+        markersRef.current.forEach((marker) => marker?.remove?.());
         markersRef.current = [];
 
-        // Create new markers with accurate positioning
         points.forEach(([lng, lat], i) => {
             const el = document.createElement("div");
             el.style.cssText = `
         width: 18px;
         height: 18px;
-        background: #0066CC;
+        background: ${routeColor};
         border: 2px solid #FFFFFF;
         border-radius: 50%;
         box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         cursor: move;
       `;
 
-            // Add point number
             const number = document.createElement("div");
             number.textContent = i + 1;
             number.style.cssText = `
@@ -165,13 +180,13 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
             const marker = new mapboxgl.Marker({
                 element: el,
                 draggable: true,
-                offset: [0, 0]
+                offset: [0, 0],
             })
                 .setLngLat([lng, lat])
                 .addTo(map);
 
             marker.on("dragstart", () => {
-                el.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.3)";
+                el.style.boxShadow = `0 0 0 3px ${routeColor}80`;
             });
 
             marker.on("dragend", () => {
@@ -183,7 +198,6 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
             markersRef.current[i] = marker;
         });
 
-        // Update polyline with smooth interpolation
         const sourceId = `editor-source-${activeRouteId}`;
         const layerId = `editor-line-${activeRouteId}`;
         polylineLayerId.current = layerId;
@@ -192,8 +206,8 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
             type: "Feature",
             geometry: {
                 type: "LineString",
-                coordinates: points
-            }
+                coordinates: points,
+            },
         };
 
         try {
@@ -201,7 +215,7 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
                 map.addSource(sourceId, {
                     type: "geojson",
                     data: lineData,
-                    lineMetrics: true
+                    lineMetrics: true,
                 });
 
                 map.addLayer({
@@ -210,36 +224,49 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint) => {
                     source: sourceId,
                     layout: {
                         "line-join": "round",
-                        "line-cap": "round"
+                        "line-cap": "round",
                     },
                     paint: {
-                        "line-color": '#0066CC',
+                        "line-color": routeColor,
                         "line-width": 4,
                         "line-opacity": 0.8,
-                        "line-gradient": [
-                            'interpolate',
-                            ['linear'],
-                            ['line-progress'],
-                            0, '#0066CC',
-                            0.5, '#4da6ff',
-                            1, '#0066CC'
-                        ]
-                    }
+                    },
                 });
             } else {
                 map.getSource(sourceId).setData(lineData);
+                map.setPaintProperty(layerId, 'line-color', routeColor);
             }
         } catch (error) {
-            console.warn('Error updating polyline:', error);
+            console.warn("Error updating polyline:", error);
         }
 
         return clearVisuals;
-    }, [map, points, activeRouteId, updatePoint, clearVisuals]);
+    }, [map, points, activeRouteId, updatePoint, routeColor, clearVisuals]);
 
     return { clearVisuals, updateVisuals };
 };
 
-// UI Components for RouteEditor
+// ----------------------------------------------------------------------
+// UI Components
+// ----------------------------------------------------------------------
+
+// Color Picker Component (reusable)
+const ColorPicker = ({ color, onChange, label = "Route Color" }) => (
+    <div style={styles.formGroup}>
+        <div style={styles.label}>{label}</div>
+        <div style={styles.colorPickerRow}>
+            <input
+                type="color"
+                value={color || '#0066CC'}
+                onChange={(e) => onChange(e.target.value)}
+                style={styles.colorInput}
+                aria-label="Select route color"
+            />
+            <span style={styles.colorValue}>{color || '#0066CC'}</span>
+        </div>
+    </div>
+);
+
 const HeaderSection = ({ activeRoute, exitEditor, undo, redo, canUndo, canRedo }) => (
     <div style={styles.header}>
         <div style={styles.headerLeft}>
@@ -254,8 +281,8 @@ const HeaderSection = ({ activeRoute, exitEditor, undo, redo, canUndo, canRedo }
                             <span>Editing: </span>
                             <span style={{ fontWeight: 500 }}>{activeRoute.name}</span>
                             <span style={{ marginLeft: 8, fontSize: '12px', color: '#6B7280' }}>
-                {activeRoute.code}
-              </span>
+                                {activeRoute.code}
+                            </span>
                         </>
                     ) : "Create new route"}
                 </div>
@@ -285,42 +312,135 @@ const HeaderSection = ({ activeRoute, exitEditor, undo, redo, canUndo, canRedo }
     </div>
 );
 
-const QuickActions = ({ editMode, toggleEditMode, onSnapToRoad, isSnapping, points, onSave, isSaving }) => (
-    <div style={styles.quickActions}>
-        <button
-            onClick={toggleEditMode}
-            style={{
-                ...styles.quickActionButton,
-                background: editMode ? '#DC2626' : '#0066CC'
-            }}
-            title={editMode ? 'Stop adding points (Esc)' : 'Add points to map'}
-        >
-            {editMode ? 'Stop Adding' : 'Add Points'}
-        </button>
-        <button
-            onClick={onSnapToRoad}
-            disabled={isSnapping || points.length < 2}
-            style={{
-                ...styles.quickActionButton,
-                background: '#7C3AED'
-            }}
-            title="Snap route to nearest roads"
-        >
-            {isSnapping ? 'Snapping...' : 'Snap to Road'}
-        </button>
-        <button
-            onClick={onSave}
-            disabled={isSaving || points.length < 2}
-            style={{
-                ...styles.quickActionButton,
-                background: '#065F46'
-            }}
-            title="Save route to database"
-        >
-            {isSaving ? 'Saving...' : 'Save Route'}
-        </button>
-    </div>
-);
+const QuickActions = ({
+                          addMode,
+                          setAddMode,
+                          onSnapToRoad,
+                          isSnapping,
+                          points,
+                          onSave,
+                          isSaving
+                      }) => {
+    const [showDropdown, setShowDropdown] = useState(false);
+    const dropdownRef = useRef(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+                setShowDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleMainClick = () => {
+        // Default action: Add to End
+        setAddMode(addMode === 'end' ? 'off' : 'end');
+        setShowDropdown(false);
+    };
+
+    const handleSelect = (mode) => {
+        setAddMode(addMode === mode ? 'off' : mode);
+        setShowDropdown(false);
+    };
+
+    return (
+        <div style={styles.quickActions}>
+            <button
+                onClick={() => setAddMode(addMode === 'insert' ? 'off' : 'insert')}
+                style={{
+                    ...styles.quickActionButton,
+                    background: addMode === 'insert' ? '#DC2626' : '#0066CC'
+                }}
+                title={addMode === 'insert' ? 'Stop adding points (Esc)' : 'Add / insert points on map'}
+            >
+                {addMode === 'insert' ? 'Stop Adding' : 'Add Points'}
+            </button>
+
+            {/* Single Split Button for Start/End */}
+            <div ref={dropdownRef} style={{ position: 'relative' }}>
+                <button
+                    onClick={handleMainClick}
+                    style={{
+                        ...styles.quickActionButton,
+                        background: addMode === 'start' || addMode === 'end' ? '#DC2626' : '#7C3AED',
+                        borderTopRightRadius: 0,
+                        borderBottomRightRadius: 0,
+                        minWidth: '140px'
+                    }}
+                    disabled={points.length === 0}
+                    title={addMode === 'start' ? 'Stop adding at start' : addMode === 'end' ? 'Stop adding at end' : 'Add to end (default)'}
+                >
+                    {addMode === 'start' ? 'Adding to Start' : addMode === 'end' ? 'Adding to End' : 'Add to End'}
+                </button>
+                <button
+                    onClick={() => setShowDropdown(!showDropdown)}
+                    style={{
+                        ...styles.quickActionButton,
+                        background: addMode === 'start' || addMode === 'end' ? '#DC2626' : '#7C3AED',
+                        borderTopLeftRadius: 0,
+                        borderBottomLeftRadius: 0,
+                        minWidth: '40px',
+                        padding: '10px 8px'
+                    }}
+                    disabled={points.length === 0}
+                    title="Choose start or end"
+                >
+                    ▼
+                </button>
+                {showDropdown && (
+                    <div style={styles.dropdownMenu}>
+                        <button
+                            onClick={() => handleSelect('end')}
+                            style={{
+                                ...styles.dropdownItem,
+                                fontWeight: addMode === 'end' ? 'bold' : 'normal',
+                                background: addMode === 'end' ? '#E2E8F0' : 'white'
+                            }}
+                        >
+                            Add to End
+                        </button>
+                        <button
+                            onClick={() => handleSelect('start')}
+                            style={{
+                                ...styles.dropdownItem,
+                                fontWeight: addMode === 'start' ? 'bold' : 'normal',
+                                background: addMode === 'start' ? '#E2E8F0' : 'white'
+                            }}
+                        >
+                            Add to Start
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <button
+                onClick={onSnapToRoad}
+                disabled={isSnapping || points.length < 2}
+                style={{
+                    ...styles.quickActionButton,
+                    background: '#065F46'
+                }}
+                title="Snap route to nearest roads"
+            >
+                {isSnapping ? 'Snapping...' : 'Snap to Road'}
+            </button>
+
+            <button
+                onClick={onSave}
+                disabled={isSaving || points.length < 2}
+                style={{
+                    ...styles.quickActionButton,
+                    background: '#065F46'
+                }}
+                title="Save route to database"
+            >
+                {isSaving ? 'Saving...' : 'Save Route'}
+            </button>
+        </div>
+    );
+};
 
 const AdvancedTools = ({
                            simplifyTolerance,
@@ -345,8 +465,8 @@ const AdvancedTools = ({
                     style={styles.slider}
                 />
                 <span style={styles.toleranceValue}>
-          {simplifyTolerance.toFixed(5)}
-        </span>
+                    {simplifyTolerance.toFixed(5)}
+                </span>
                 <button
                     onClick={onSimplify}
                     disabled={points.length < 3}
@@ -434,6 +554,12 @@ const CreateRouteForm = ({ newRoute, setNewRoute, onCreateRoute, isSaving, regio
             />
         </div>
 
+        {/* Color Picker – uses route_color column */}
+        <ColorPicker
+            color={newRoute.color}
+            onChange={(color) => setNewRoute(prev => ({ ...prev, color }))}
+        />
+
         <div style={styles.formGroup}>
             <div style={styles.label}>Region (Optional)</div>
             <select
@@ -512,6 +638,75 @@ const RegionAssignment = ({ activeRoute, activeRouteId, updateRoute, regions }) 
     </div>
 );
 
+// Route Appearance Card – updates route_color
+const RouteAppearanceCard = ({ activeRoute, activeRouteId, updateRoute }) => (
+    <div style={styles.card}>
+        <div style={styles.cardTitle}>Route Appearance</div>
+        <ColorPicker
+            color={activeRoute.color || '#0066CC'}
+            onChange={(color) => updateRoute(activeRouteId, (route) => ({
+                ...route,
+                color
+            }))}
+            label="Line Color"
+        />
+    </div>
+);
+
+const RouteStatusCard = ({ activeRoute, activeRouteId, updateRoute }) => {
+    return (
+        <div style={styles.card}>
+            <div style={styles.cardTitle}>Route Status & Credit</div>
+            <div style={styles.formGroup}>
+                <div style={styles.label}>Status</div>
+                <select
+                    value={activeRoute.status || "draft"}
+                    onChange={(e) =>
+                        updateRoute(activeRouteId, (route) => ({
+                            ...route,
+                            status: e.target.value,
+                        }))
+                    }
+                    style={styles.select}
+                >
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="temporarily_suspended">Temporarily Suspended</option>
+                    <option value="deprecated">Deprecated</option>
+                </select>
+            </div>
+            <div style={styles.formGroup}>
+                <div style={styles.label}>Credit Status</div>
+                <select
+                    value={activeRoute.credit_status || "uncredited"}
+                    onChange={(e) =>
+                        updateRoute(activeRouteId, (route) => ({
+                            ...route,
+                            credit_status: e.target.value,
+                        }))
+                    }
+                    style={styles.select}
+                >
+                    <option value="uncredited">Uncredited</option>
+                    <option value="credited">Credited</option>
+                    <option value="credit_revoked">Credit Revoked</option>
+                </select>
+            </div>
+            {activeRoute.credit_status === "credited" && activeRoute.credited_by_operator_id && (
+                <div style={styles.creditInfo}>
+                    <div style={styles.detailLabel}>Credited by</div>
+                    <div style={styles.detailValue}>Operator ID: {activeRoute.credited_by_operator_id}</div>
+                    {activeRoute.credited_at && (
+                        <div style={styles.detailValue}>
+                            Date: {new Date(activeRoute.credited_at).toLocaleDateString()}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const PointItem = ({ point, index, isActive, onSelect, onDelete, onUpdate, pointsLength }) => {
     const [lng, lat] = point;
 
@@ -585,8 +780,8 @@ const PointsList = ({
                 Route Points ({points.length})
                 {editMode && (
                     <span style={styles.editHint}>
-            Click on map to add points
-          </span>
+                        Click on map to add points
+                    </span>
                 )}
             </div>
             <div style={styles.pointActions}>
@@ -615,7 +810,7 @@ const PointsList = ({
                     Click "Add Points" then click on the map to add route points
                 </div>
                 <div style={styles.emptyHint}>
-                    Click between existing points to insert new ones
+                    Click between existing points to insert new ones, or use Add to Start/End buttons
                 </div>
             </div>
         ) : (
@@ -637,7 +832,9 @@ const PointsList = ({
     </div>
 );
 
+// ----------------------------------------------------------------------
 // Main RouteEditor Component
+// ----------------------------------------------------------------------
 export function RouteEditor({
                                 map,
                                 routes,
@@ -647,14 +844,15 @@ export function RouteEditor({
                                 exitEditor,
                                 saveRouteToDatabase,
                                 deleteRouteFromDatabase,
-                                regions = []
+                                regions = [],
                             }) {
     // State
-    const [editMode, setEditMode] = useState(false);
+    const [addMode, setAddMode] = useState('off'); // 'off', 'insert', 'start', 'end'
     const [newRoute, setNewRoute] = useState({
         name: "",
         code: "",
-        regionId: ""
+        regionId: "",
+        color: "#0066CC",
     });
     const [activePointIndex, setActivePointIndex] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -668,7 +866,7 @@ export function RouteEditor({
 
     // Memoized values
     const activeRoute = useMemo(
-        () => routes.find(r => r.id === activeRouteId),
+        () => routes.find((r) => r.id === activeRouteId),
         [routes, activeRouteId]
     );
 
@@ -678,7 +876,8 @@ export function RouteEditor({
         map,
         pointEditing.points,
         activeRouteId,
-        pointEditing.updatePoint
+        pointEditing.updatePoint,
+        activeRoute?.color || "#0066CC"
     );
 
     const routeLength = useMemo(
@@ -704,7 +903,7 @@ export function RouteEditor({
         updateVisuals();
     }, [updateVisuals]);
 
-    // Helper function for distance calculation
+    // Distance to segment
     const distanceToSegment = useCallback((point, segmentStart, segmentEnd) => {
         const [px, py] = point;
         const [x1, y1] = segmentStart;
@@ -739,44 +938,104 @@ export function RouteEditor({
         return Math.sqrt(dx * dx + dy * dy);
     }, []);
 
-    /* ---------------- Enhanced Map Click Handler ---------------- */
-    const handleMapClick = useCallback((e) => {
-        if (!editMode || !activeRouteId) return;
+    // --------------------------------------------------------------------
+    // Enhanced Map Click Handler – respects addMode
+    // --------------------------------------------------------------------
+    const handleMapClick = useCallback(
+        (e) => {
+            if (!map || !activeRouteId || addMode === 'off') return;
 
-        // Get precise coordinates from the click event
-        const { lng, lat } = e.lngLat;
+            const { lng, lat } = e.lngLat;
+            let insertAtIndex = -1; // default append
 
-        // Check if we're clicking near an existing point
-        const clickThreshold = 0.0001; // ~11 meters
-        let insertAtIndex = -1;
-
-        for (let i = 0; i < pointEditing.points.length - 1; i++) {
-            const [lng1, lat1] = pointEditing.points[i];
-            const [lng2, lat2] = pointEditing.points[i + 1];
-
-            // Calculate distance to line segment
-            const distance = distanceToSegment([lng, lat], [lng1, lat1], [lng2, lat2]);
-
-            if (distance < clickThreshold) {
-                insertAtIndex = i;
-                break;
+            // Mode 1: Add to Start
+            if (addMode === 'start') {
+                insertAtIndex = 0;
             }
-        }
+            // Mode 2: Add to End
+            else if (addMode === 'end') {
+                insertAtIndex = -1;
+            }
+            // Mode 3: Smart Insert/Extend
+            else if (addMode === 'insert') {
+                const points = pointEditing.points;
+                const clickThreshold = 0.0001;
 
-        pointEditing.addPoint(lng, lat, insertAtIndex);
+                // --- Extend at start (click before first point) ---
+                if (points.length >= 2) {
+                    const [x1, y1] = points[0];
+                    const [x2, y2] = points[1];
+                    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+                    if (len > 0) {
+                        const t = ((lng - x1) * dx + (lat - y1) * dy) / (len * len);
+                        if (t < 0) {
+                            const projX = x1 + t * dx, projY = y1 + t * dy;
+                            if (Math.hypot(lng - projX, lat - projY) < clickThreshold) {
+                                insertAtIndex = 0;
+                            }
+                        }
+                    }
+                } else if (points.length === 1) {
+                    if (distance([lng, lat], points[0]) < clickThreshold) {
+                        insertAtIndex = 0;
+                    }
+                }
 
-        // Visual feedback
-        if (map) {
-            const popup = new mapboxgl.Popup({ closeButton: false })
-                .setLngLat([lng, lat])
-                .setHTML(`<div style="padding: 4px; font-size: 12px;">Point added</div>`)
-                .addTo(map);
+                // --- Extend at end (click after last point) ---
+                if (insertAtIndex === -1 && points.length >= 2) {
+                    const [x1, y1] = points[points.length - 2];
+                    const [x2, y2] = points[points.length - 1];
+                    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+                    if (len > 0) {
+                        const t = ((lng - x1) * dx + (lat - y1) * dy) / (len * len);
+                        if (t > 1) {
+                            const projX = x1 + t * dx, projY = y1 + t * dy;
+                            if (Math.hypot(lng - projX, lat - projY) < clickThreshold) {
+                                insertAtIndex = -1;
+                            }
+                        }
+                    }
+                }
 
-            setTimeout(() => popup.remove(), 1000);
-        }
-    }, [editMode, activeRouteId, pointEditing, map, distanceToSegment]);
+                // --- Insert between two points ---
+                if (insertAtIndex === -1 && points.length >= 2) {
+                    for (let i = 0; i < points.length - 1; i++) {
+                        const dist = distanceToSegment([lng, lat], points[i], points[i + 1]);
+                        if (dist < clickThreshold) {
+                            insertAtIndex = i + 1;
+                            break;
+                        }
+                    }
+                }
 
-    /* ---------------- Enhanced Snap to Road ---------------- */
+                // If still -1, append as fallback
+                if (insertAtIndex === -1) {
+                    insertAtIndex = -1;
+                }
+            }
+
+            pointEditing.addPoint(lng, lat, insertAtIndex);
+
+            // Visual feedback
+            if (map) {
+                let message = "Point added";
+                if (insertAtIndex === 0) message = "Added at start";
+                else if (insertAtIndex === -1) message = "Added at end";
+                else message = "Point inserted";
+
+                const popup = new mapboxgl.Popup({ closeButton: false })
+                    .setLngLat([lng, lat])
+                    .setHTML(`<div style="padding: 4px; font-size: 12px; background: ${activeRoute?.color || '#0066CC'}; color: white; border-radius: 4px;">${message}</div>`)
+                    .addTo(map);
+                setTimeout(() => popup.remove(), 1000);
+            }
+        },
+        [addMode, activeRouteId, map, pointEditing, distanceToSegment, activeRoute?.color]
+    );
+
+    // --------------------------------------------------------------------
+    // Snap to Road
+    // --------------------------------------------------------------------
     const snapToRoad = useCallback(async () => {
         if (pointEditing.points.length < 2) {
             alert("At least 2 points are required to snap to roads");
@@ -821,7 +1080,6 @@ export function RouteEditor({
             const snappedCoordinates = data.matchings[0].geometry.coordinates;
             pointEditing.resetPoints(snappedCoordinates);
 
-            // Show success message
             if (map) {
                 const popup = new mapboxgl.Popup({ closeButton: false })
                     .setLngLat(snappedCoordinates[Math.floor(snappedCoordinates.length / 2)])
@@ -842,128 +1100,9 @@ export function RouteEditor({
         }
     }, [pointEditing, map]);
 
-    /* ---------------- Route CRUD ---------------- */
-    const createRoute = useCallback(async () => {
-        if (!newRoute.name.trim() || !newRoute.code.trim()) {
-            alert("Please enter route name and code");
-            return;
-        }
-
-        try {
-            setIsSaving(true);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                alert('Please log in to create routes.');
-                return;
-            }
-
-            const routeData = {
-                route_code: newRoute.code.trim(),
-                origin_type: 'field',
-                proposed_by_user_id: user.id,
-                credited_by_operator_id: user.id, // ADD THIS LINE
-                status: 'draft',
-                geometry: {
-                    type: 'LineString',
-                    coordinates: [],
-                    properties: {
-                        color: '#0066CC',
-                        name: newRoute.name.trim()
-                    }
-                },
-                region_id: newRoute.regionId || null,
-                length_meters: 0,
-                last_geometry_update_at: new Date().toISOString()
-            };
-
-            const { data: newRouteDb, error } = await supabase
-                .from('routes')
-                .insert([routeData])
-                .select(`
-          *,
-          region:region_id (
-            region_id,
-            name,
-            code
-          )
-        `)
-                .single();
-
-            if (error) throw error;
-
-            const editorRoute = {
-                id: newRouteDb.id,
-                name: newRoute.name.trim(),
-                code: newRouteDb.route_code,
-                color: '#0066CC',
-                rawPoints: [],
-                snappedPoints: null,
-                regionId: newRouteDb.region_id,
-                regionName: newRouteDb.region?.name,
-                status: newRouteDb.status,
-                length_meters: newRouteDb.length_meters,
-                created_at: newRouteDb.created_at,
-                updated_at: newRouteDb.updated_at
-            };
-
-            setRoutes(prev => [editorRoute, ...prev]);
-            setActiveRouteId(newRouteDb.id);
-            setNewRoute({ name: "", code: "", regionId: "" });
-            pointEditing.resetPoints([]);
-
-            alert(`Route "${newRoute.name.trim()}" created`);
-        } catch (error) {
-            console.error('Error creating route:', error);
-            alert(`Failed: ${error.message}`);
-        } finally {
-            setIsSaving(false);
-        }
-    }, [newRoute, setRoutes, setActiveRouteId, pointEditing]);
-
-    const deleteRoute = useCallback(async (id) => {
-        if (!window.confirm("Are you sure you want to delete this route? This action cannot be undone.")) return;
-
-        try {
-            await deleteRouteFromDatabase(id);
-
-            // Clear points if this was the active route
-            if (activeRouteId === id) {
-                pointEditing.resetPoints([]);
-            }
-
-            alert("Route deleted");
-        } catch (error) {
-            console.error('Error deleting route:', error);
-            alert("Failed to delete route");
-        }
-    }, [activeRouteId, deleteRouteFromDatabase, pointEditing]);
-
-    const saveRoute = useCallback(async () => {
-        if (!activeRoute || pointEditing.points.length < 2) {
-            alert("Route must have at least 2 points");
-            return;
-        }
-
-        try {
-            setIsSaving(true);
-
-            const routeToSave = {
-                ...activeRoute,
-                rawPoints: pointEditing.points,
-                length_meters: routeLength * 1000 // Convert km to meters
-            };
-
-            await saveRouteToDatabase(routeToSave);
-            alert("Route saved successfully");
-        } catch (error) {
-            console.error('Error saving route:', error);
-            alert(`Failed to save route: ${error.message}`);
-        } finally {
-            setIsSaving(false);
-        }
-    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength]);
-
-    /* ---------------- Enhanced Route Operations ---------------- */
+    // --------------------------------------------------------------------
+    // Simplify Route
+    // --------------------------------------------------------------------
     const simplifyRoutePoints = useCallback(() => {
         if (pointEditing.points.length < 3) {
             alert("Route needs at least 3 points to simplify");
@@ -979,6 +1118,9 @@ export function RouteEditor({
         }
     }, [pointEditing, simplifyTolerance]);
 
+    // --------------------------------------------------------------------
+    // Export Route
+    // --------------------------------------------------------------------
     const exportRoute = useCallback(async (format = 'geojson') => {
         if (pointEditing.points.length < 2) {
             alert("Route must have at least 2 points to export");
@@ -992,6 +1134,7 @@ export function RouteEditor({
                 properties: {
                     name: activeRoute?.name || "Unnamed Route",
                     code: activeRoute?.code || "",
+                    color: activeRoute?.color || "#0066CC",
                     length_km: routeLength,
                     point_count: pointEditing.points.length,
                     created: new Date().toISOString()
@@ -1009,7 +1152,6 @@ export function RouteEditor({
                 filename = `${activeRoute?.code || 'route'}.geojson`;
                 mimeType = 'application/geo+json';
             } else if (format === 'gpx') {
-                // Convert to GPX format
                 const gpx = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="Route Editor" xmlns="http://www.topografix.com/GPX/1/1">
   <trk>
@@ -1024,7 +1166,6 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                 mimeType = 'application/gpx+xml';
             }
 
-            // Create download link
             const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1044,63 +1185,202 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
         }
     }, [pointEditing.points, activeRoute, routeLength]);
 
-    const updateRoute = useCallback((id, updater) => {
-        setRoutes(prev => prev.map(r => (r.id === id ? updater(r) : r)));
-    }, [setRoutes]);
+    // --------------------------------------------------------------------
+    // Route CRUD – uses route_color column
+    // --------------------------------------------------------------------
+    const createRoute = useCallback(async () => {
+        if (!newRoute.name.trim() || !newRoute.code.trim()) {
+            alert("Please enter route name and code");
+            return;
+        }
 
-    /* ---------------- Map Interaction Setup ---------------- */
+        try {
+            setIsSaving(true);
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
+            if (!user) {
+                alert("Please log in to create routes.");
+                return;
+            }
+
+            const routeData = {
+                route_code: newRoute.code.trim(),
+                origin_type: "field",
+                proposed_by_user_id: user.id,
+                status: "draft",
+                route_color: newRoute.color || "#0066CC", // 👈 new column
+                geometry: {
+                    type: "LineString",
+                    coordinates: [],
+                    properties: {
+                        name: newRoute.name.trim()
+                        // color removed
+                    },
+                },
+                region_id: newRoute.regionId || null,
+                length_meters: 0,
+                last_geometry_update_at: new Date().toISOString(),
+                credit_status: "uncredited",
+                credit_confidence: 0,
+                credited_by_operator_id: null,
+                credited_at: null,
+            };
+
+            const { data: newRouteDb, error } = await supabase
+                .from("routes")
+                .insert([routeData])
+                .select(
+                    `
+                    *,
+                    region:region_id (
+                        region_id,
+                        name,
+                        code
+                    )
+                `
+                )
+                .single();
+
+            if (error) throw error;
+
+            const editorRoute = {
+                id: newRouteDb.id,
+                name: newRoute.name.trim(),
+                code: newRouteDb.route_code,
+                color: newRouteDb.route_color, // 👈 read from column
+                rawPoints: [],
+                regionId: newRouteDb.region_id,
+                regionName: newRouteDb.region?.name,
+                status: newRouteDb.status,
+                length_meters: newRouteDb.length_meters,
+                created_at: newRouteDb.created_at,
+                updated_at: newRouteDb.updated_at,
+                credit_status: newRouteDb.credit_status,
+                credited_by_operator_id: newRouteDb.credited_by_operator_id,
+                credited_at: newRouteDb.credited_at,
+                credit_confidence: newRouteDb.credit_confidence,
+                credit_reason: newRouteDb.credit_reason,
+                geometry: newRouteDb.geometry
+            };
+
+            setRoutes((prev) => [editorRoute, ...prev]);
+            setActiveRouteId(newRouteDb.id);
+            setNewRoute({ name: "", code: "", regionId: "", color: "#0066CC" });
+            pointEditing.resetPoints([]);
+            setAddMode('off');
+
+            alert(`Route "${newRoute.name.trim()}" created`);
+        } catch (error) {
+            console.error("Error creating route:", error);
+            alert(`Failed: ${error.message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    }, [newRoute, setRoutes, setActiveRouteId, pointEditing]);
+
+    const deleteRoute = useCallback(
+        async (id) => {
+            if (
+                !window.confirm(
+                    "Are you sure you want to delete this route? This action cannot be undone."
+                )
+            )
+                return;
+
+            try {
+                await deleteRouteFromDatabase(id);
+                if (activeRouteId === id) {
+                    pointEditing.resetPoints([]);
+                    setAddMode('off');
+                }
+                alert("Route deleted");
+            } catch (error) {
+                console.error("Error deleting route:", error);
+                alert("Failed to delete route");
+            }
+        },
+        [activeRouteId, deleteRouteFromDatabase, pointEditing]
+    );
+
+    const saveRoute = useCallback(async () => {
+        if (!activeRoute || pointEditing.points.length < 2) {
+            alert("Route must have at least 2 points");
+            return;
+        }
+
+        try {
+            setIsSaving(true);
+
+            const routeToSave = {
+                ...activeRoute,
+                rawPoints: pointEditing.points,
+                length_meters: routeLength * 1000,
+            };
+
+            await saveRouteToDatabase(routeToSave);
+            alert("Route saved successfully");
+        } catch (error) {
+            console.error("Error saving route:", error);
+            alert(`Failed to save route: ${error.message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength]);
+
+    const updateRoute = useCallback(
+        (id, updater) => {
+            setRoutes((prev) => prev.map((r) => (r.id === id ? updater(r) : r)));
+        },
+        [setRoutes]
+    );
+
+    // Map interaction setup
     useEffect(() => {
         if (!map || !activeRouteId) return;
 
-        if (editMode) {
-            // Remove any existing click handler
+        if (addMode !== 'off') {
             if (clickHandlerRef.current) {
                 map.off("click", clickHandlerRef.current);
             }
-
-            // Add new click handler with better precision
             clickHandlerRef.current = handleMapClick;
             map.on("click", handleMapClick);
 
-            map.getCanvas().style.cursor = 'crosshair';
+            map.getCanvas().style.cursor = "crosshair";
 
-            // Add keyboard shortcuts
             const handleKeyDown = (e) => {
-                if (e.key === 'Escape') {
-                    setEditMode(false);
-                } else if (e.ctrlKey && e.key === 'z') {
+                if (e.key === "Escape") {
+                    setAddMode('off');
+                } else if (e.ctrlKey && e.key === "z") {
                     e.preventDefault();
                     pointEditing.undo();
-                } else if (e.ctrlKey && e.key === 'y') {
+                } else if (e.ctrlKey && e.key === "y") {
                     e.preventDefault();
                     pointEditing.redo();
                 }
             };
 
-            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener("keydown", handleKeyDown);
 
             return () => {
                 map.off("click", handleMapClick);
-                map.getCanvas().style.cursor = '';
-                window.removeEventListener('keydown', handleKeyDown);
+                map.getCanvas().style.cursor = "";
+                window.removeEventListener("keydown", handleKeyDown);
             };
         } else {
-            map.getCanvas().style.cursor = '';
+            map.getCanvas().style.cursor = "";
         }
-    }, [map, editMode, activeRouteId, handleMapClick, pointEditing]);
+    }, [map, addMode, activeRouteId, handleMapClick, pointEditing]);
 
-    // Cleanup on unmount
     useEffect(() => {
         return () => {
             clearVisuals();
         };
     }, [clearVisuals]);
 
-    const toggleEditMode = useCallback(() => {
-        setEditMode(!editMode);
-        setActivePointIndex(null);
-    }, [editMode]);
-
+    // --------------------------------------------------------------------
+    // Render
+    // --------------------------------------------------------------------
     return (
         <div style={styles.container}>
             <HeaderSection
@@ -1116,8 +1396,8 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                 {activeRoute && (
                     <>
                         <QuickActions
-                            editMode={editMode}
-                            toggleEditMode={toggleEditMode}
+                            addMode={addMode}
+                            setAddMode={setAddMode}
                             onSnapToRoad={snapToRoad}
                             isSnapping={isSnapping}
                             points={pointEditing.points}
@@ -1170,9 +1450,21 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                             regions={regions}
                         />
 
+                        <RouteAppearanceCard
+                            activeRoute={activeRoute}
+                            activeRouteId={activeRouteId}
+                            updateRoute={updateRoute}
+                        />
+
+                        <RouteStatusCard
+                            activeRoute={activeRoute}
+                            activeRouteId={activeRouteId}
+                            updateRoute={updateRoute}
+                        />
+
                         <PointsList
                             points={pointEditing.points}
-                            editMode={editMode}
+                            editMode={addMode !== 'off'}
                             activePointIndex={activePointIndex}
                             setActivePointIndex={setActivePointIndex}
                             onDeletePoint={pointEditing.deletePoint}
@@ -1186,6 +1478,9 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
     );
 }
 
+// ----------------------------------------------------------------------
+// Styles
+// ----------------------------------------------------------------------
 const styles = {
     container: {
         display: 'flex',
@@ -1671,5 +1966,70 @@ const styles = {
             borderColor: '#0066CC',
             boxShadow: '0 0 0 2px rgba(0,102,204,0.1)'
         }
-    }
+    },
+    // Color picker styles
+    colorPickerRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+    },
+    colorInput: {
+        width: '40px',
+        height: '40px',
+        border: '1px solid #CBD5E1',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        padding: 0,
+    },
+    colorValue: {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: '#1E293B',
+    },
+    // Dropdown styles
+    dropdownMenu: {
+        position: 'absolute',
+        top: '100%',
+        left: 0,
+        width: '100%',
+        background: 'white',
+        border: '1px solid #CBD5E1',
+        borderRadius: '4px',
+        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+        zIndex: 10,
+        marginTop: '2px'
+    },
+    dropdownItem: {
+        width: '100%',
+        padding: '8px 12px',
+        border: 'none',
+        background: 'white',
+        textAlign: 'left',
+        fontSize: '13px',
+        cursor: 'pointer',
+        '&:hover': {
+            background: '#F1F5F9'
+        }
+    },
+    creditInfo: {
+        marginTop: "12px",
+        padding: "12px",
+        background: "#F0FDF4",
+        borderRadius: "6px",
+        border: "1px solid #86EFAC",
+    },
+    detailLabel: {
+        fontSize: "11px",
+        color: "#166534",
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+        marginBottom: "2px",
+    },
+    detailValue: {
+        fontSize: "13px",
+        color: "#14532D",
+        marginBottom: "4px",
+        wordBreak: "break-all",
+    },
 };
