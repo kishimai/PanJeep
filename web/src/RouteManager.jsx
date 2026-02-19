@@ -6,6 +6,107 @@ import { estimateLength } from "./routeUtils.jsx";
 import { supabase } from "./supabase";
 import { isValidUUID, getRandomColor } from './routeUtils.jsx';
 
+// POI Management Hook
+const usePOIs = (regionId = null) => {
+    const [pois, setPois] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    const fetchPOIs = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            let query = supabase
+                .from('points_of_interest')
+                .select(`
+                    id,
+                    name,
+                    type,
+                    geometry,
+                    region_id,
+                    metadata,
+                    created_at,
+                    region:region_id (
+                        name,
+                        code
+                    )
+                `)
+                .order('name');
+
+            if (regionId) {
+                query = query.eq('region_id', regionId);
+            }
+
+            const { data, error } = await query;
+
+            if (error) throw error;
+
+            // Transform data for easier use
+            const transformed = (data || []).map(poi => ({
+                ...poi,
+                coordinates: poi.geometry?.coordinates || [0, 0],
+                lng: poi.geometry?.coordinates?.[0] || 0,
+                lat: poi.geometry?.coordinates?.[1] || 0
+            }));
+
+            setPois(transformed);
+        } catch (err) {
+            console.error('Error fetching POIs:', err);
+            setError(err.message);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [regionId]);
+
+    useEffect(() => {
+        fetchPOIs();
+    }, [fetchPOIs]);
+
+    return { pois, isLoading, error, refetch: fetchPOIs };
+};
+
+// Helper to get icon/color based on POI type
+const getPOIStyle = (type) => {
+    switch (type) {
+        case 'terminal':
+            return {
+                color: '#DC2626', // red
+                icon: '🚏',
+                size: 30,
+                label: 'Terminal'
+            };
+        case 'stop':
+            return {
+                color: '#2563EB', // blue
+                icon: '⬤',
+                size: 24,
+                label: 'Stop'
+            };
+        case 'hub':
+            return {
+                color: '#7C3AED', // purple
+                icon: '🏢',
+                size: 32,
+                label: 'Hub'
+            };
+        case 'landmark':
+            return {
+                color: '#059669', // green
+                icon: '📍',
+                size: 28,
+                label: 'Landmark'
+            };
+        default:
+            return {
+                color: '#6B7280', // gray
+                icon: '📍',
+                size: 24,
+                label: 'POI'
+            };
+    }
+};
+
 // Custom Hook: Mapbox Initialization
 const useMapbox = (containerRef) => {
     const [map, setMap] = useState(null);
@@ -122,7 +223,7 @@ const useRoutes = (regionFilter = '') => {
                 id: dbRoute.id,
                 name: dbRoute.geometry?.properties?.name || dbRoute.route_code,
                 code: dbRoute.route_code,
-                color: dbRoute.route_color || '#0066CC', // 👈 direct column
+                color: dbRoute.route_color || '#0066CC',
                 rawPoints: dbRoute.geometry?.coordinates || [],
                 regionId: dbRoute.region_id,
                 regionName: dbRoute.region?.name,
@@ -157,18 +258,14 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
     const clearAllRouteLayers = useCallback(() => {
         if (!map) return;
 
-        // Remove all event listeners
         routeLayersRef.current.forEach(layerId => {
             try {
                 map.off("click", layerId);
                 map.off("mouseenter", layerId);
                 map.off("mouseleave", layerId);
-            } catch (e) {
-                // Ignore errors for non-existent listeners
-            }
+            } catch (e) {}
         });
 
-        // Remove all layers
         routeLayersRef.current.forEach(layerId => {
             try {
                 if (map.getLayer(layerId)) {
@@ -179,7 +276,6 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
             }
         });
 
-        // Remove all sources
         routeSourcesRef.current.forEach(sourceId => {
             try {
                 if (map.getSource(sourceId)) {
@@ -190,7 +286,6 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
             }
         });
 
-        // Clear the refs
         routeLayersRef.current.clear();
         routeSourcesRef.current.clear();
     }, [map]);
@@ -198,7 +293,6 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
     const drawRoutes = useCallback((routesToDraw) => {
         if (!map || !map.isStyleLoaded()) return;
 
-        // Clear existing event listeners
         routeLayersRef.current.forEach(layerId => {
             map.off("click", layerId);
             map.off("mouseenter", layerId);
@@ -221,13 +315,11 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
             };
 
             try {
-                // Add source
                 if (!map.getSource(sourceId)) {
                     map.addSource(sourceId, { type: "geojson", data: geojson });
                     routeSourcesRef.current.add(sourceId);
                 }
 
-                // Add line layer
                 if (!map.getLayer(lineId)) {
                     map.addLayer({
                         id: lineId,
@@ -246,7 +338,6 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
                     routeLayersRef.current.add(lineId);
                 }
 
-                // Add invisible hover layer
                 if (!map.getLayer(hoverLayerId)) {
                     map.addLayer({
                         id: hoverLayerId,
@@ -265,16 +356,12 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
                     routeLayersRef.current.add(hoverLayerId);
                 }
 
-                // Update source data
                 map.getSource(sourceId).setData(geojson);
 
-                // Update line appearance based on selection
                 map.setPaintProperty(lineId, 'line-color', route.color || '#0066CC');
                 map.setPaintProperty(lineId, 'line-width', selectedRouteId === route.id ? 4 : 3);
                 map.setPaintProperty(lineId, 'line-opacity', selectedRouteId === route.id ? 1 : 0.8);
 
-
-                // Add event handlers
                 const handleClick = () => {
                     onRouteSelect(route);
 
@@ -311,19 +398,34 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
     return { drawRoutes, clearAllRouteLayers };
 };
 
-// UI Components
-const Header = ({ isLoading, filteredRoutes, selectedRegionFilter, getRegionName, onNewRoute }) => (
+// Header Component with POI Toggle
+const Header = ({ isLoading, filteredRoutes, selectedRegionFilter, getRegionName, onNewRoute, showPOIs, setShowPOIs, poiCount }) => (
     <div style={styles.header}>
         <div>
             <div style={styles.title}>Route Manager</div>
             <div style={styles.subtitle}>
                 {isLoading ? 'Loading...' : `${filteredRoutes.length} routes`}
                 {selectedRegionFilter && ` • ${getRegionName(selectedRegionFilter)}`}
+                {poiCount > 0 && ` • ${poiCount} POIs`}
             </div>
         </div>
-        <button onClick={onNewRoute} style={styles.primaryButton}>
-            New Route
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+                onClick={() => setShowPOIs(!showPOIs)}
+                style={{
+                    ...styles.secondaryButton,
+                    background: showPOIs ? '#0066CC' : '#FFFFFF',
+                    color: showPOIs ? '#FFFFFF' : '#475569',
+                    border: showPOIs ? 'none' : '1px solid #CBD5E1'
+                }}
+                title={showPOIs ? 'Hide Points of Interest' : 'Show Points of Interest'}
+            >
+                {showPOIs ? `Hide POIs (${poiCount})` : `Show POIs (${poiCount})`}
+            </button>
+            <button onClick={onNewRoute} style={styles.primaryButton}>
+                New Route
+            </button>
+        </div>
     </div>
 );
 
@@ -582,15 +684,18 @@ const EmptyState = ({ searchQuery, selectedRegionFilter, getRegionName, onCreate
 export function RouteManager({ operatorId }) {
     const mapContainer = useRef(null);
     const { map, mapLoaded } = useMapbox(mapContainer);
+    const poiMarkersRef = useRef([]);
 
     const [selectedRegionFilter, setSelectedRegionFilter] = useState("");
     const [searchQuery, setSearchQuery] = useState("");
     const [viewEditRoute, setViewEditRoute] = useState(false);
     const [selectedRouteId, setSelectedRouteId] = useState(null);
     const [activeRouteId, setActiveRouteId] = useState(null);
+    const [showPOIs, setShowPOIs] = useState(true);
 
     const { regions, isLoadingRegions, fetchRegions } = useRegions();
     const { routes, isLoadingRoutes, routesError, fetchRoutes, setRoutes } = useRoutes(selectedRegionFilter);
+    const { pois } = usePOIs(selectedRegionFilter || null);
 
     const getRegionName = useCallback((regionId) => {
         if (regionId === "unassigned") return "Unassigned";
@@ -608,7 +713,6 @@ export function RouteManager({ operatorId }) {
     const filteredRoutes = useMemo(() => {
         let result = routes;
 
-        // Apply region filter
         if (selectedRegionFilter) {
             if (selectedRegionFilter === "unassigned") {
                 result = result.filter(route => !route.regionId);
@@ -617,7 +721,6 @@ export function RouteManager({ operatorId }) {
             }
         }
 
-        // Apply search filter
         if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase();
             result = result.filter(route =>
@@ -647,6 +750,86 @@ export function RouteManager({ operatorId }) {
         handleRouteSelect
     );
 
+    // Function to draw POI markers
+    const drawPOIMarkers = useCallback(() => {
+        if (!map || !mapLoaded || !showPOIs) return;
+
+        // Clear existing POI markers
+        poiMarkersRef.current.forEach(marker => marker.remove());
+        poiMarkersRef.current = [];
+
+        pois.forEach(poi => {
+            if (!poi.geometry || poi.geometry.type !== 'Point') return;
+
+            const [lng, lat] = poi.geometry.coordinates;
+            const style = getPOIStyle(poi.type);
+
+            // Create custom marker element (static, no hover scaling)
+            const el = document.createElement('div');
+            el.className = 'poi-marker';
+            el.style.cssText = `
+            width: ${style.size}px;
+            height: ${style.size}px;
+            background: ${style.color};
+            border: 2px solid #FFFFFF;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: ${style.size * 0.6}px;
+            font-weight: bold;
+        `;
+            el.textContent = style.icon;
+
+            // Remove hover scaling and transition
+            // (No mouseenter/mouseleave listeners, no transition property)
+
+            // Create popup with POI info
+            const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
+            <div style="padding: 8px; max-width: 200px;">
+                <div style="font-weight: bold; margin-bottom: 4px;">${poi.name}</div>
+                <div style="font-size: 12px; color: #666; margin-bottom: 4px;">
+                    Type: ${style.label}
+                </div>
+                ${poi.region?.name ? `
+                    <div style="font-size: 12px; color: #666;">
+                        Region: ${poi.region.name}
+                    </div>
+                ` : ''}
+                <div style="font-size: 10px; color: #999; margin-top: 4px;">
+                    Click for details
+                </div>
+            </div>
+        `);
+
+            // Add click handler to show in sidebar (optional)
+            el.addEventListener('click', () => {
+                console.log('POI clicked:', poi);
+            });
+
+            // Create and store marker
+            const marker = new mapboxgl.Marker({ element: el })
+                .setLngLat([lng, lat])
+                .setPopup(popup)
+                .addTo(map);
+
+            poiMarkersRef.current.push(marker);
+        });
+    }, [map, mapLoaded, showPOIs, pois]);
+
+    // Update markers when POIs change
+    useEffect(() => {
+        drawPOIMarkers();
+
+        return () => {
+            poiMarkersRef.current.forEach(marker => marker.remove());
+            poiMarkersRef.current = [];
+        };
+    }, [drawPOIMarkers]);
+
     const zoomToRoute = useCallback((route) => {
         if (!map || !route.rawPoints.length) return;
 
@@ -665,7 +848,6 @@ export function RouteManager({ operatorId }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('User not authenticated');
 
-            // Fetch existing route to detect status/credit changes
             let existingRoute = null;
             if (route.id && isValidUUID(route.id)) {
                 const { data } = await supabase
@@ -695,13 +877,11 @@ export function RouteManager({ operatorId }) {
                 last_geometry_update_at: new Date().toISOString(),
                 region_id: route.regionId || null,
                 updated_at: new Date().toISOString(),
-                // Credit fields
                 credit_status: route.credit_status || 'uncredited',
                 credit_confidence: route.credit_confidence || 0,
                 credit_reason: route.credit_reason || null
             };
 
-            // ---- Credit granting logic ----
             if (route.credit_status === 'credited') {
                 if (!existingRoute?.credited_by_operator_id || existingRoute.credit_status !== 'credited') {
                     routeData.credited_by_operator_id = user.id;
@@ -719,14 +899,13 @@ export function RouteManager({ operatorId }) {
                 routeData.credited_at = null;
                 routeData.credit_confidence = 0;
                 routeData.credit_reason = route.credit_reason || 'Credit revoked';
-            } else { // uncredited
+            } else {
                 routeData.credited_by_operator_id = null;
                 routeData.credited_at = null;
                 routeData.credit_confidence = 0;
                 routeData.credit_reason = null;
             }
 
-            // ---- Status change tracking ----
             if (route.status && (!existingRoute || existingRoute.status !== route.status)) {
                 routeData.status_changed_at = new Date().toISOString();
                 routeData.status_changed_by = user.id;
@@ -752,7 +931,6 @@ export function RouteManager({ operatorId }) {
                 result = data;
             }
 
-            // Transform and update local state
             const updatedRoute = {
                 id: result.id,
                 name: result.geometry?.properties?.name || result.route_code,
@@ -803,10 +981,8 @@ export function RouteManager({ operatorId }) {
 
             if (error) throw error;
 
-            // Remove from local state immediately
             setRoutes(prev => prev.filter(r => r.id !== routeId));
 
-            // Clear selection
             if (selectedRouteId === routeId) {
                 setSelectedRouteId(null);
             }
@@ -861,7 +1037,6 @@ export function RouteManager({ operatorId }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('User not authenticated');
 
-            // Generate unique route code
             let newRouteCode = `${route.code}-COPY`;
             let counter = 1;
             let codeExists = true;
@@ -901,13 +1076,11 @@ export function RouteManager({ operatorId }) {
                 length_meters: route.length_meters || 0,
                 last_geometry_update_at: new Date().toISOString(),
                 region_id: route.regionId || null,
-                // Credit – fresh start
                 credit_status: 'uncredited',
                 credit_confidence: 0,
                 credit_reason: null,
                 credited_by_operator_id: null,
                 credited_at: null,
-                // Status tracking
                 status_changed_at: new Date().toISOString(),
                 status_changed_by: user.id
             };
@@ -1012,6 +1185,9 @@ export function RouteManager({ operatorId }) {
                                 setViewEditRoute(true);
                                 setActiveRouteId(null);
                             }}
+                            showPOIs={showPOIs}
+                            setShowPOIs={setShowPOIs}
+                            poiCount={pois.length}
                         />
 
                         <FilterSection

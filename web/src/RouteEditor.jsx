@@ -859,6 +859,7 @@ export function RouteEditor({
     const [isSnapping, setIsSnapping] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [simplifyTolerance, setSimplifyTolerance] = useState(0.0001);
+    const [isUpdatingGraph, setIsUpdatingGraph] = useState(false); // optional
 
     // Refs
     const clickHandlerRef = useRef(null);
@@ -936,6 +937,37 @@ export function RouteEditor({
         const dx = px - xx;
         const dy = py - yy;
         return Math.sqrt(dx * dx + dy * dy);
+    }, []);
+
+    // --------------------------------------------------------------------
+    // NEW: Trigger Edge Function to update route_graph_nodes
+    // --------------------------------------------------------------------
+    const triggerRouteGraphUpdate = useCallback(async (routeId) => {
+        if (!routeId) return;
+        try {
+            setIsUpdatingGraph(true);
+            const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-route-graph-nodes`;
+            const response = await fetch(functionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({ routeId }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('Failed to update route graph:', errorData);
+                // Optionally show a non‑blocking warning
+            } else {
+                const result = await response.json();
+                console.log(`Route graph updated: ${result.count} nodes linked`);
+            }
+        } catch (err) {
+            console.error('Error calling edge function:', err);
+        } finally {
+            setIsUpdatingGraph(false);
+        }
     }, []);
 
     // --------------------------------------------------------------------
@@ -1303,6 +1335,9 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
         [activeRouteId, deleteRouteFromDatabase, pointEditing]
     );
 
+    // --------------------------------------------------------------------
+    // Modified saveRoute – now calls triggerRouteGraphUpdate after success
+    // --------------------------------------------------------------------
     const saveRoute = useCallback(async () => {
         if (!activeRoute || pointEditing.points.length < 2) {
             alert("Route must have at least 2 points");
@@ -1320,13 +1355,16 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
 
             await saveRouteToDatabase(routeToSave);
             alert("Route saved successfully");
+
+            // Trigger graph update for this route
+            await triggerRouteGraphUpdate(activeRoute.id);
         } catch (error) {
             console.error("Error saving route:", error);
             alert(`Failed to save route: ${error.message}`);
         } finally {
             setIsSaving(false);
         }
-    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength]);
+    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength, triggerRouteGraphUpdate]);
 
     const updateRoute = useCallback(
         (id, updater) => {
