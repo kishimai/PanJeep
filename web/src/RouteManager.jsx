@@ -72,7 +72,8 @@ const getPOIStyle = (type) => {
         case 'terminal':
             return {
                 color: '#DC2626', // red
-                icon: '🚏',
+                icon: '🚏',        // kept for popup or fallback
+                text: 'T',          // new short text
                 size: 30,
                 label: 'Terminal'
             };
@@ -80,6 +81,7 @@ const getPOIStyle = (type) => {
             return {
                 color: '#2563EB', // blue
                 icon: '⬤',
+                text: 'S',
                 size: 24,
                 label: 'Stop'
             };
@@ -87,6 +89,7 @@ const getPOIStyle = (type) => {
             return {
                 color: '#7C3AED', // purple
                 icon: '🏢',
+                text: 'H',
                 size: 32,
                 label: 'Hub'
             };
@@ -94,6 +97,7 @@ const getPOIStyle = (type) => {
             return {
                 color: '#059669', // green
                 icon: '📍',
+                text: 'L',
                 size: 28,
                 label: 'Landmark'
             };
@@ -101,6 +105,7 @@ const getPOIStyle = (type) => {
             return {
                 color: '#6B7280', // gray
                 icon: '📍',
+                text: '?',
                 size: 24,
                 label: 'POI'
             };
@@ -782,7 +787,7 @@ export function RouteManager({ operatorId }) {
             font-size: ${style.size * 0.6}px;
             font-weight: bold;
         `;
-            el.textContent = style.icon;
+            el.textContent = style.text;
 
             // Remove hover scaling and transition
             // (No mouseenter/mouseleave listeners, no transition property)
