@@ -5,112 +5,28 @@ import { RouteEditor } from "./RouteEditor.jsx";
 import { estimateLength } from "./routeUtils.jsx";
 import { supabase } from "./supabase";
 import { isValidUUID, getRandomColor } from './routeUtils.jsx';
+import { POIManager } from "./POIManager";
 
-// POI Management Hook
-const usePOIs = (regionId = null) => {
-    const [pois, setPois] = useState([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState(null);
-
-    const fetchPOIs = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
-
-        try {
-            let query = supabase
-                .from('points_of_interest')
-                .select(`
-                    id,
-                    name,
-                    type,
-                    geometry,
-                    region_id,
-                    metadata,
-                    created_at,
-                    region:region_id (
-                        name,
-                        code
-                    )
-                `)
-                .order('name');
-
-            if (regionId) {
-                query = query.eq('region_id', regionId);
-            }
-
-            const { data, error } = await query;
-
-            if (error) throw error;
-
-            // Transform data for easier use
-            const transformed = (data || []).map(poi => ({
-                ...poi,
-                coordinates: poi.geometry?.coordinates || [0, 0],
-                lng: poi.geometry?.coordinates?.[0] || 0,
-                lat: poi.geometry?.coordinates?.[1] || 0
-            }));
-
-            setPois(transformed);
-        } catch (err) {
-            console.error('Error fetching POIs:', err);
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [regionId]);
-
-    useEffect(() => {
-        fetchPOIs();
-    }, [fetchPOIs]);
-
-    return { pois, isLoading, error, refetch: fetchPOIs };
-};
-
-// Helper to get icon/color based on POI type
-const getPOIStyle = (type) => {
-    switch (type) {
-        case 'terminal':
-            return {
-                color: '#DC2626', // red
-                icon: '🚏',        // kept for popup or fallback
-                text: 'T',          // new short text
-                size: 30,
-                label: 'Terminal'
-            };
-        case 'stop':
-            return {
-                color: '#2563EB', // blue
-                icon: '⬤',
-                text: 'S',
-                size: 24,
-                label: 'Stop'
-            };
-        case 'hub':
-            return {
-                color: '#7C3AED', // purple
-                icon: '🏢',
-                text: 'H',
-                size: 32,
-                label: 'Hub'
-            };
-        case 'landmark':
-            return {
-                color: '#059669', // green
-                icon: '📍',
-                text: 'L',
-                size: 28,
-                label: 'Landmark'
-            };
-        default:
-            return {
-                color: '#6B7280', // gray
-                icon: '📍',
-                text: '?',
-                size: 24,
-                label: 'POI'
-            };
-    }
-};
+// Helper to transform database route to editor format
+const transformRoute = (dbRoute) => ({
+    id: dbRoute.id,
+    name: dbRoute.geometry?.properties?.name || dbRoute.route_code,
+    code: dbRoute.route_code,
+    color: dbRoute.route_color || '#0066CC',
+    rawPoints: dbRoute.geometry?.coordinates || [],
+    regionId: dbRoute.region_id,
+    regionName: dbRoute.region?.name,
+    status: dbRoute.status,
+    length_meters: dbRoute.length_meters,
+    created_at: dbRoute.created_at,
+    updated_at: dbRoute.updated_at,
+    credit_status: dbRoute.credit_status,
+    credited_by_operator_id: dbRoute.credited_by_operator_id,
+    credited_at: dbRoute.credited_at,
+    credit_confidence: dbRoute.credit_confidence,
+    credit_reason: dbRoute.credit_reason,
+    version: dbRoute.version || 1,
+});
 
 // Custom Hook: Mapbox Initialization
 const useMapbox = (containerRef) => {
@@ -203,13 +119,13 @@ const useRoutes = (regionFilter = '') => {
             let query = supabase
                 .from('routes')
                 .select(`
-          *,
-          region:region_id (
-            region_id,
-            name,
-            code
-          )
-        `)
+                    *,
+                    region:region_id (
+                        region_id,
+                        name,
+                        code
+                    )
+                `)
                 .is('deleted_at', null)
                 .neq('status', 'deprecated')
                 .order('created_at', { ascending: false });
@@ -224,25 +140,7 @@ const useRoutes = (regionFilter = '') => {
 
             if (error) throw error;
 
-            const transformedRoutes = (data || []).map(dbRoute => ({
-                id: dbRoute.id,
-                name: dbRoute.geometry?.properties?.name || dbRoute.route_code,
-                code: dbRoute.route_code,
-                color: dbRoute.route_color || '#0066CC',
-                rawPoints: dbRoute.geometry?.coordinates || [],
-                regionId: dbRoute.region_id,
-                regionName: dbRoute.region?.name,
-                status: dbRoute.status,
-                length_meters: dbRoute.length_meters,
-                created_at: dbRoute.created_at,
-                updated_at: dbRoute.updated_at,
-                credit_status: dbRoute.credit_status,
-                credited_by_operator_id: dbRoute.credited_by_operator_id,
-                credited_at: dbRoute.credited_at,
-                credit_confidence: dbRoute.credit_confidence,
-                credit_reason: dbRoute.credit_reason,
-            }));
-
+            const transformedRoutes = (data || []).map(dbRoute => transformRoute(dbRoute));
             setRoutes(transformedRoutes);
         } catch (error) {
             console.error('Error fetching routes:', error);
@@ -403,8 +301,8 @@ const useRouteVisualization = (map, routes, selectedRouteId, onRouteSelect) => {
     return { drawRoutes, clearAllRouteLayers };
 };
 
-// Header Component with POI Toggle
-const Header = ({ isLoading, filteredRoutes, selectedRegionFilter, getRegionName, onNewRoute, showPOIs, setShowPOIs, poiCount }) => (
+// Header Component with POI toggle
+const Header = ({ isLoading, filteredRoutes, selectedRegionFilter, getRegionName, onNewRoute, onManagePOIs, poiCount }) => (
     <div style={styles.header}>
         <div>
             <div style={styles.title}>Route Manager</div>
@@ -415,17 +313,8 @@ const Header = ({ isLoading, filteredRoutes, selectedRegionFilter, getRegionName
             </div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-                onClick={() => setShowPOIs(!showPOIs)}
-                style={{
-                    ...styles.secondaryButton,
-                    background: showPOIs ? '#0066CC' : '#FFFFFF',
-                    color: showPOIs ? '#FFFFFF' : '#475569',
-                    border: showPOIs ? 'none' : '1px solid #CBD5E1'
-                }}
-                title={showPOIs ? 'Hide Points of Interest' : 'Show Points of Interest'}
-            >
-                {showPOIs ? `Hide POIs (${poiCount})` : `Show POIs (${poiCount})`}
+            <button onClick={onManagePOIs} style={styles.secondaryButton}>
+                Manage POIs
             </button>
             <button onClick={onNewRoute} style={styles.primaryButton}>
                 New Route
@@ -508,22 +397,20 @@ const RouteItem = React.memo(({
                 <div style={styles.routeSubtitle}>
                     {route.regionName || "No region assigned"}
                     {route.snappedPoints && (
-                        <span style={styles.snappedBadge}>
-              Snapped
-            </span>
+                        <span style={styles.snappedBadge}>Snapped</span>
                     )}
                 </div>
             </div>
             <div style={styles.routeBadges}>
-        <span style={{
-            ...styles.badgeStatus,
-            background: route.status === 'draft' ? '#F3F4F6' :
-                route.status === 'active' ? '#D1FAE5' : '#FEF3C7',
-            color: route.status === 'draft' ? '#374151' :
-                route.status === 'active' ? '#065F46' : '#92400E'
-        }}>
-          {route.status}
-        </span>
+                <span style={{
+                    ...styles.badgeStatus,
+                    background: route.status === 'draft' ? '#F3F4F6' :
+                        route.status === 'active' ? '#D1FAE5' : '#FEF3C7',
+                    color: route.status === 'draft' ? '#374151' :
+                        route.status === 'active' ? '#065F46' : '#92400E'
+                }}>
+                    {route.status}
+                </span>
             </div>
         </div>
 
@@ -596,8 +483,8 @@ const RouteDetailsCard = ({ route, regions, onEdit, onSave, onAssignRegion }) =>
                 color: route.status === 'draft' ? '#374151' :
                     route.status === 'active' ? '#065F46' : '#92400E'
             }}>
-        {route.status}
-      </span>
+                {route.status}
+            </span>
         </div>
 
         <div style={styles.selectedRouteGrid}>
@@ -651,8 +538,11 @@ const RouteDetailsCard = ({ route, regions, onEdit, onSave, onAssignRegion }) =>
             >
                 Edit Route
             </button>
+            // In RouteDetailsCard, when calling onSave:
             <button
                 onClick={async () => {
+                    // Optional: only save if something changed
+                    // You'd need to track original route or compare with current version
                     try {
                         await onSave(route);
                         alert('Route saved successfully');
@@ -689,18 +579,18 @@ const EmptyState = ({ searchQuery, selectedRegionFilter, getRegionName, onCreate
 export function RouteManager({ operatorId }) {
     const mapContainer = useRef(null);
     const { map, mapLoaded } = useMapbox(mapContainer);
-    const poiMarkersRef = useRef([]);
 
     const [selectedRegionFilter, setSelectedRegionFilter] = useState("");
     const [searchQuery, setSearchQuery] = useState("");
     const [viewEditRoute, setViewEditRoute] = useState(false);
     const [selectedRouteId, setSelectedRouteId] = useState(null);
     const [activeRouteId, setActiveRouteId] = useState(null);
-    const [showPOIs, setShowPOIs] = useState(true);
+    const [showPOIManager, setShowPOIManager] = useState(false);
 
     const { regions, isLoadingRegions, fetchRegions } = useRegions();
     const { routes, isLoadingRoutes, routesError, fetchRoutes, setRoutes } = useRoutes(selectedRegionFilter);
-    const { pois } = usePOIs(selectedRegionFilter || null);
+
+    const poiCount = 0;
 
     const getRegionName = useCallback((regionId) => {
         if (regionId === "unassigned") return "Unassigned";
@@ -755,86 +645,6 @@ export function RouteManager({ operatorId }) {
         handleRouteSelect
     );
 
-    // Function to draw POI markers
-    const drawPOIMarkers = useCallback(() => {
-        if (!map || !mapLoaded || !showPOIs) return;
-
-        // Clear existing POI markers
-        poiMarkersRef.current.forEach(marker => marker.remove());
-        poiMarkersRef.current = [];
-
-        pois.forEach(poi => {
-            if (!poi.geometry || poi.geometry.type !== 'Point') return;
-
-            const [lng, lat] = poi.geometry.coordinates;
-            const style = getPOIStyle(poi.type);
-
-            // Create custom marker element (static, no hover scaling)
-            const el = document.createElement('div');
-            el.className = 'poi-marker';
-            el.style.cssText = `
-            width: ${style.size}px;
-            height: ${style.size}px;
-            background: ${style.color};
-            border: 2px solid #FFFFFF;
-            border-radius: 50%;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: ${style.size * 0.6}px;
-            font-weight: bold;
-        `;
-            el.textContent = style.text;
-
-            // Remove hover scaling and transition
-            // (No mouseenter/mouseleave listeners, no transition property)
-
-            // Create popup with POI info
-            const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
-            <div style="padding: 8px; max-width: 200px;">
-                <div style="font-weight: bold; margin-bottom: 4px;">${poi.name}</div>
-                <div style="font-size: 12px; color: #666; margin-bottom: 4px;">
-                    Type: ${style.label}
-                </div>
-                ${poi.region?.name ? `
-                    <div style="font-size: 12px; color: #666;">
-                        Region: ${poi.region.name}
-                    </div>
-                ` : ''}
-                <div style="font-size: 10px; color: #999; margin-top: 4px;">
-                    Click for details
-                </div>
-            </div>
-        `);
-
-            // Add click handler to show in sidebar (optional)
-            el.addEventListener('click', () => {
-                console.log('POI clicked:', poi);
-            });
-
-            // Create and store marker
-            const marker = new mapboxgl.Marker({ element: el })
-                .setLngLat([lng, lat])
-                .setPopup(popup)
-                .addTo(map);
-
-            poiMarkersRef.current.push(marker);
-        });
-    }, [map, mapLoaded, showPOIs, pois]);
-
-    // Update markers when POIs change
-    useEffect(() => {
-        drawPOIMarkers();
-
-        return () => {
-            poiMarkersRef.current.forEach(marker => marker.remove());
-            poiMarkersRef.current = [];
-        };
-    }, [drawPOIMarkers]);
-
     const zoomToRoute = useCallback((route) => {
         if (!map || !route.rawPoints.length) return;
 
@@ -848,132 +658,52 @@ export function RouteManager({ operatorId }) {
         });
     }, [map]);
 
+    // UPDATED: saveRouteToDatabase using RPC
     const saveRouteToDatabase = useCallback(async (route) => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('User not authenticated');
 
-            let existingRoute = null;
-            if (route.id && isValidUUID(route.id)) {
-                const { data } = await supabase
-                    .from('routes')
-                    .select('status, credit_status, credited_by_operator_id, credited_at')
-                    .eq('id', route.id)
-                    .single();
-                existingRoute = data;
-            }
-
-            const routeData = {
-                route_code: route.code || `ROUTE_${Date.now()}`,
-                origin_type: route.origin_type || 'field',
-                proposed_by_user_id: route.proposed_by_user_id || user.id,
-                status: route.status || 'draft',
-                route_color: route.color || '#0066CC',
-                geometry: {
-                    type: 'LineString',
-                    coordinates: route.rawPoints || [],
-                    properties: {
-                        color: route.color || '#0066CC',
-                        name: route.name || route.code || 'Unnamed Route',
-                        ...(route.geometry?.properties || {})
-                    }
-                },
-                length_meters: Math.round((route.rawPoints?.length > 1 ? estimateLength(route.rawPoints) : 0) * 1000),
-                last_geometry_update_at: new Date().toISOString(),
-                region_id: route.regionId || null,
-                updated_at: new Date().toISOString(),
-                credit_status: route.credit_status || 'uncredited',
-                credit_confidence: route.credit_confidence || 0,
-                credit_reason: route.credit_reason || null
+            // Build the geometry object
+            const geometry = {
+                type: 'LineString',
+                coordinates: route.rawPoints || [],
+                properties: {
+                    name: route.name || route.code || 'Unnamed Route',
+                    color: route.color || '#0066CC',
+                }
             };
 
-            if (route.credit_status === 'credited') {
-                if (!existingRoute?.credited_by_operator_id || existingRoute.credit_status !== 'credited') {
-                    routeData.credited_by_operator_id = user.id;
-                    routeData.credited_at = new Date().toISOString();
-                    routeData.credit_confidence = 1.0;
-                    routeData.credit_reason = route.credit_reason || 'Credited via route editor';
-                } else {
-                    routeData.credited_by_operator_id = existingRoute.credited_by_operator_id;
-                    routeData.credited_at = existingRoute.credited_at;
-                    routeData.credit_confidence = existingRoute.credit_confidence || 1.0;
-                    routeData.credit_reason = route.credit_reason || existingRoute.credit_reason;
-                }
-            } else if (route.credit_status === 'credit_revoked') {
-                routeData.credited_by_operator_id = null;
-                routeData.credited_at = null;
-                routeData.credit_confidence = 0;
-                routeData.credit_reason = route.credit_reason || 'Credit revoked';
-            } else {
-                routeData.credited_by_operator_id = null;
-                routeData.credited_at = null;
-                routeData.credit_confidence = 0;
-                routeData.credit_reason = null;
-            }
-
-            if (route.status && (!existingRoute || existingRoute.status !== route.status)) {
-                routeData.status_changed_at = new Date().toISOString();
-                routeData.status_changed_by = user.id;
-            }
-
-            let result;
-            if (route.id && isValidUUID(route.id)) {
-                const { data, error } = await supabase
-                    .from('routes')
-                    .update(routeData)
-                    .eq('id', route.id)
-                    .select('*, region:region_id(*)')
-                    .single();
-                if (error) throw error;
-                result = data;
-            } else {
-                const { data, error } = await supabase
-                    .from('routes')
-                    .insert([{ ...routeData, created_at: new Date().toISOString() }])
-                    .select('*, region:region_id(*)')
-                    .single();
-                if (error) throw error;
-                result = data;
-            }
-
-            const updatedRoute = {
-                id: result.id,
-                name: result.geometry?.properties?.name || result.route_code,
-                code: result.route_code,
-                color: result.geometry?.properties?.color || '#0066CC',
-                rawPoints: result.geometry?.coordinates || [],
-                regionId: result.region_id,
-                regionName: result.region?.name,
-                status: result.status,
-                length_meters: result.length_meters,
-                created_at: result.created_at,
-                updated_at: result.updated_at,
-                credit_status: result.credit_status,
-                credited_by_operator_id: result.credited_by_operator_id,
-                credited_at: result.credited_at,
-                credit_confidence: result.credit_confidence,
-                credit_reason: result.credit_reason,
-                status_changed_at: result.status_changed_at,
-                status_changed_by: result.status_changed_by
-            };
-
-            setRoutes(prev => {
-                const idx = prev.findIndex(r => r.id === result.id);
-                if (idx >= 0) {
-                    const newRoutes = [...prev];
-                    newRoutes[idx] = updatedRoute;
-                    return newRoutes;
-                }
-                return [updatedRoute, ...prev];
+            // Call the RPC function
+            const { error } = await supabase.rpc('update_route_geometry', {
+                p_route_id: route.id,
+                p_new_geometry: geometry,
+                p_resolution_method: 'approved_with_adjustments'
             });
 
-            return result;
+            if (error) throw error;
+
+            // Refetch the updated route to sync local state
+            const { data: updated, error: fetchError } = await supabase
+                .from('routes')
+                .select('*, region:region_id(*)')
+                .eq('id', route.id)
+                .single();
+
+            if (fetchError) throw fetchError;
+
+            const updatedRoute = transformRoute(updated);
+
+            setRoutes(prev => prev.map(r => r.id === route.id ? updatedRoute : r));
+
+            return updated;
         } catch (error) {
             console.error('Error saving route:', error);
             throw new Error(error.message);
         }
-    }, []);
+    }, [setRoutes]);
 
+    // UPDATED: deleteRouteFromDatabase (soft delete - optionally add history logging later)
     const deleteRouteFromDatabase = useCallback(async (routeId) => {
         try {
             const { error } = await supabase
@@ -1001,7 +731,7 @@ export function RouteManager({ operatorId }) {
             alert('Failed to delete route');
             return false;
         }
-    }, [selectedRouteId, activeRouteId]);
+    }, [selectedRouteId, activeRouteId, setRoutes]);
 
     const assignRegion = useCallback(async (routeId, regionId) => {
         try {
@@ -1029,7 +759,7 @@ export function RouteManager({ operatorId }) {
             console.error('Error assigning region:', error);
             alert('Failed to assign region');
         }
-    }, [selectedRoute, getRegionName]);
+    }, [selectedRoute, getRegionName, setRoutes]);
 
     const duplicateRoute = useCallback(async (routeId) => {
         const route = routes.find(r => r.id === routeId);
@@ -1098,25 +828,7 @@ export function RouteManager({ operatorId }) {
 
             if (error) throw error;
 
-            const newEditorRoute = {
-                id: newRoute.id,
-                name: newRoute.geometry?.properties?.name || `${route.name} (Copy)`,
-                code: newRoute.route_code,
-                color: duplicateColor,
-                rawPoints: newRoute.geometry?.coordinates || [],
-                regionId: newRoute.region_id,
-                regionName: newRoute.region?.name,
-                status: newRoute.status,
-                length_meters: newRoute.length_meters,
-                created_at: newRoute.created_at,
-                updated_at: newRoute.updated_at,
-                credit_status: newRoute.credit_status,
-                credited_by_operator_id: newRoute.credited_by_operator_id,
-                credited_at: newRoute.credited_at,
-                credit_confidence: newRoute.credit_confidence,
-                credit_reason: newRoute.credit_reason,
-                original_route_id: route.id
-            };
+            const newEditorRoute = transformRoute(newRoute);
 
             setRoutes(prev => [newEditorRoute, ...prev]);
             setSelectedRouteId(newRoute.id);
@@ -1190,9 +902,8 @@ export function RouteManager({ operatorId }) {
                                 setViewEditRoute(true);
                                 setActiveRouteId(null);
                             }}
-                            showPOIs={showPOIs}
-                            setShowPOIs={setShowPOIs}
-                            poiCount={pois.length}
+                            onManagePOIs={() => setShowPOIManager(true)}
+                            poiCount={poiCount}
                         />
 
                         <FilterSection
@@ -1269,6 +980,18 @@ export function RouteManager({ operatorId }) {
                     </>
                 )}
             </div>
+
+            {/* POI Manager Overlay */}
+            {showPOIManager && (
+                <div style={styles.poiOverlay}>
+                    <POIManager
+                        map={map}
+                        regions={regions}
+                        regionFilter={selectedRegionFilter}
+                        onClose={() => setShowPOIManager(false)}
+                    />
+                </div>
+            )}
         </div>
     );
 }
@@ -1296,6 +1019,18 @@ const styles = {
         height: '100%',
         overflow: 'hidden'
     },
+    poiOverlay: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        width: '420px',
+        height: '100%',
+        background: '#ffffff',
+        borderLeft: '1px solid #e2e8f0',
+        boxShadow: '-2px 0 8px rgba(0,0,0,0.1)',
+        zIndex: 30,
+        overflow: 'hidden'
+    },
     header: {
         padding: '20px',
         borderBottom: '1px solid #E2E8F0',
@@ -1315,30 +1050,6 @@ const styles = {
         color: '#64748B',
         fontSize: '13px',
         fontWeight: 400
-    },
-    filtersSection: {
-        padding: '16px 20px',
-        borderBottom: '1px solid #E2E8F0',
-        background: '#F8FAFC'
-    },
-    searchContainer: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px'
-    },
-    searchInput: {
-        width: '100%',
-        padding: '10px 14px',
-        border: '1px solid #CBD5E1',
-        borderRadius: '6px',
-        fontSize: '14px',
-        background: '#FFFFFF',
-        color: '#1E293B',
-        '&:focus': {
-            outline: 'none',
-            borderColor: '#0066CC',
-            boxShadow: '0 0 0 2px rgba(0, 102, 204, 0.1)'
-        }
     },
     primaryButton: {
         background: '#0066CC',
@@ -1367,6 +1078,30 @@ const styles = {
         transition: 'all 0.2s',
         '&:hover': {
             background: '#F1F5F9'
+        }
+    },
+    filtersSection: {
+        padding: '16px 20px',
+        borderBottom: '1px solid #E2E8F0',
+        background: '#F8FAFC'
+    },
+    searchContainer: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
+    },
+    searchInput: {
+        width: '100%',
+        padding: '10px 14px',
+        border: '1px solid #CBD5E1',
+        borderRadius: '6px',
+        fontSize: '14px',
+        background: '#FFFFFF',
+        color: '#1E293B',
+        '&:focus': {
+            outline: 'none',
+            borderColor: '#0066CC',
+            boxShadow: '0 0 0 2px rgba(0, 102, 204, 0.1)'
         }
     },
     section: {
@@ -1636,10 +1371,10 @@ if (typeof document !== 'undefined') {
     const styleSheet = document.styleSheets[0];
     if (styleSheet) {
         styleSheet.insertRule(`
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-    `, styleSheet.cssRules.length);
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        `, styleSheet.cssRules.length);
     }
 }

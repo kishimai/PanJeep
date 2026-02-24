@@ -14,6 +14,76 @@ const distance = (p1, p2) => {
 };
 
 // ----------------------------------------------------------------------
+// Distance from point to line segment (moved outside component)
+// ----------------------------------------------------------------------
+const distanceToSegment = (point, segmentStart, segmentEnd) => {
+    const [px, py] = point;
+    const [x1, y1] = segmentStart;
+    const [x2, y2] = segmentEnd;
+
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+
+    if (lenSq !== 0) param = dot / lenSq;
+
+    let xx, yy;
+
+    if (param < 0) {
+        xx = x1;
+        yy = y1;
+    } else if (param > 1) {
+        xx = x2;
+        yy = y2;
+    } else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+    }
+
+    const dx = px - xx;
+    const dy = py - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+};
+
+// ----------------------------------------------------------------------
+// Simple toast system (replaces alerts for non‑blocking messages)
+// ----------------------------------------------------------------------
+const useToast = () => {
+    const [toast, setToast] = useState({ message: "", visible: false });
+    const timeoutRef = useRef(null);
+
+    const showToast = useCallback((message, duration = 3000) => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        setToast({ message, visible: true });
+        timeoutRef.current = setTimeout(() => {
+            setToast({ message: "", visible: false });
+        }, duration);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        };
+    }, []);
+
+    return { toast, showToast };
+};
+
+const Toast = ({ message, visible, style }) => {
+    if (!visible) return null;
+    return (
+        <div style={style}>
+            {message}
+        </div>
+    );
+};
+
+// ----------------------------------------------------------------------
 // Custom Hook: Point Editing with History
 // ----------------------------------------------------------------------
 const usePointEditing = (initialPoints = []) => {
@@ -121,6 +191,8 @@ const usePointEditing = (initialPoints = []) => {
 const useRouteVisualization = (map, points, activeRouteId, updatePoint, routeColor = "#0066CC") => {
     const markersRef = useRef([]);
     const polylineLayerId = useRef(null);
+    const popupTimeoutRef = useRef(null);
+    const popupRef = useRef(null);
 
     const clearVisuals = useCallback(() => {
         markersRef.current.forEach((marker) => marker?.remove?.());
@@ -140,6 +212,15 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint, routeCol
             }
             polylineLayerId.current = null;
         }
+        // Clear any pending popup timeout
+        if (popupTimeoutRef.current) {
+            clearTimeout(popupTimeoutRef.current);
+            popupTimeoutRef.current = null;
+        }
+        if (popupRef.current) {
+            popupRef.current.remove();
+            popupRef.current = null;
+        }
     }, [map, activeRouteId]);
 
     const updateVisuals = useCallback(() => {
@@ -154,27 +235,27 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint, routeCol
         points.forEach(([lng, lat], i) => {
             const el = document.createElement("div");
             el.style.cssText = `
-        width: 18px;
-        height: 18px;
-        background: ${routeColor};
-        border: 2px solid #FFFFFF;
-        border-radius: 50%;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        cursor: move;
-      `;
+                width: 18px;
+                height: 18px;
+                background: ${routeColor};
+                border: 2px solid #FFFFFF;
+                border-radius: 50%;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                cursor: move;
+            `;
 
             const number = document.createElement("div");
             number.textContent = i + 1;
             number.style.cssText = `
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        color: white;
-        font-size: 10px;
-        font-weight: bold;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-      `;
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                color: white;
+                font-size: 10px;
+                font-weight: bold;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            `;
             el.appendChild(number);
 
             const marker = new mapboxgl.Marker({
@@ -243,7 +324,24 @@ const useRouteVisualization = (map, points, activeRouteId, updatePoint, routeCol
         return clearVisuals;
     }, [map, points, activeRouteId, updatePoint, routeColor, clearVisuals]);
 
-    return { clearVisuals, updateVisuals };
+    // Helper to show a temporary popup (used by map click handler)
+    const showTempPopup = useCallback((lngLat, message, color) => {
+        if (popupTimeoutRef.current) clearTimeout(popupTimeoutRef.current);
+        if (popupRef.current) popupRef.current.remove();
+
+        const popup = new mapboxgl.Popup({ closeButton: false })
+            .setLngLat(lngLat)
+            .setHTML(`<div style="padding:4px; font-size:12px; background:${color}; color:white; border-radius:4px;">${message}</div>`)
+            .addTo(map);
+        popupRef.current = popup;
+        popupTimeoutRef.current = setTimeout(() => {
+            popup.remove();
+            popupRef.current = null;
+            popupTimeoutRef.current = null;
+        }, 1000);
+    }, [map]);
+
+    return { clearVisuals, updateVisuals, showTempPopup };
 };
 
 // ----------------------------------------------------------------------
@@ -321,34 +419,38 @@ const QuickActions = ({
                           onSave,
                           isSaving
                       }) => {
-    const [showDropdown, setShowDropdown] = useState(false);
-    const dropdownRef = useRef(null);
-
-    useEffect(() => {
-        const handleClickOutside = (e) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-                setShowDropdown(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    const handleMainClick = () => {
-        // Default action: Add to End
-        setAddMode(addMode === 'end' ? 'off' : 'end');
-        setShowDropdown(false);
+    const handleAddPointsClick = () => {
+        setAddMode(addMode === 'insert' ? 'off' : 'insert');
     };
 
-    const handleSelect = (mode) => {
-        setAddMode(addMode === mode ? 'off' : mode);
-        setShowDropdown(false);
+    const cycleStartEnd = () => {
+        let nextMode;
+        if (addMode === 'end') {
+            nextMode = 'start';
+        } else if (addMode === 'start') {
+            nextMode = 'off';
+        } else {
+            nextMode = 'end';
+        }
+        setAddMode(nextMode);
+    };
+
+    const getStartEndLabel = () => {
+        if (addMode === 'end') return 'Adding to End';
+        if (addMode === 'start') return 'Adding to Start';
+        return 'Add to End';
+    };
+
+    const getStartEndTitle = () => {
+        if (addMode === 'end') return 'Switch to adding at start';
+        if (addMode === 'start') return 'Turn off adding';
+        return 'Start adding points at the end (click again for start)';
     };
 
     return (
         <div style={styles.quickActions}>
             <button
-                onClick={() => setAddMode(addMode === 'insert' ? 'off' : 'insert')}
+                onClick={handleAddPointsClick}
                 style={{
                     ...styles.quickActionButton,
                     background: addMode === 'insert' ? '#DC2626' : '#0066CC'
@@ -358,62 +460,17 @@ const QuickActions = ({
                 {addMode === 'insert' ? 'Stop Adding' : 'Add Points'}
             </button>
 
-            {/* Single Split Button for Start/End */}
-            <div ref={dropdownRef} style={{ position: 'relative' }}>
-                <button
-                    onClick={handleMainClick}
-                    style={{
-                        ...styles.quickActionButton,
-                        background: addMode === 'start' || addMode === 'end' ? '#DC2626' : '#7C3AED',
-                        borderTopRightRadius: 0,
-                        borderBottomRightRadius: 0,
-                        minWidth: '140px'
-                    }}
-                    disabled={points.length === 0}
-                    title={addMode === 'start' ? 'Stop adding at start' : addMode === 'end' ? 'Stop adding at end' : 'Add to end (default)'}
-                >
-                    {addMode === 'start' ? 'Adding to Start' : addMode === 'end' ? 'Adding to End' : 'Add to End'}
-                </button>
-                <button
-                    onClick={() => setShowDropdown(!showDropdown)}
-                    style={{
-                        ...styles.quickActionButton,
-                        background: addMode === 'start' || addMode === 'end' ? '#DC2626' : '#7C3AED',
-                        borderTopLeftRadius: 0,
-                        borderBottomLeftRadius: 0,
-                        minWidth: '40px',
-                        padding: '10px 8px'
-                    }}
-                    disabled={points.length === 0}
-                    title="Choose start or end"
-                >
-                    ▼
-                </button>
-                {showDropdown && (
-                    <div style={styles.dropdownMenu}>
-                        <button
-                            onClick={() => handleSelect('end')}
-                            style={{
-                                ...styles.dropdownItem,
-                                fontWeight: addMode === 'end' ? 'bold' : 'normal',
-                                background: addMode === 'end' ? '#E2E8F0' : 'white'
-                            }}
-                        >
-                            Add to End
-                        </button>
-                        <button
-                            onClick={() => handleSelect('start')}
-                            style={{
-                                ...styles.dropdownItem,
-                                fontWeight: addMode === 'start' ? 'bold' : 'normal',
-                                background: addMode === 'start' ? '#E2E8F0' : 'white'
-                            }}
-                        >
-                            Add to Start
-                        </button>
-                    </div>
-                )}
-            </div>
+            <button
+                onClick={cycleStartEnd}
+                style={{
+                    ...styles.quickActionButton,
+                    background: addMode === 'start' || addMode === 'end' ? '#DC2626' : '#7C3AED'
+                }}
+                disabled={points.length === 0}
+                title={getStartEndTitle()}
+            >
+                {getStartEndLabel()}
+            </button>
 
             <button
                 onClick={onSnapToRoad}
@@ -554,20 +611,21 @@ const CreateRouteForm = ({ newRoute, setNewRoute, onCreateRoute, isSaving, regio
             />
         </div>
 
-        {/* Color Picker – uses route_color column */}
         <ColorPicker
             color={newRoute.color}
             onChange={(color) => setNewRoute(prev => ({ ...prev, color }))}
         />
 
         <div style={styles.formGroup}>
-            <div style={styles.label}>Region (Optional)</div>
+            <div style={styles.label}>Region *</div>
             <select
                 value={newRoute.regionId}
                 onChange={e => setNewRoute(prev => ({ ...prev, regionId: e.target.value }))}
                 style={styles.select}
+                required
+                aria-required="true"
             >
-                <option value="">No Region</option>
+                <option value="" disabled>Select a region</option>
                 {regions.map(region => (
                     <option key={region.region_id} value={region.region_id}>
                         {region.name} ({region.code})
@@ -578,7 +636,7 @@ const CreateRouteForm = ({ newRoute, setNewRoute, onCreateRoute, isSaving, regio
 
         <button
             onClick={onCreateRoute}
-            disabled={!newRoute.name.trim() || !newRoute.code.trim() || isSaving}
+            disabled={!newRoute.name.trim() || !newRoute.code.trim() || !newRoute.regionId || isSaving}
             style={styles.createButton}
             aria-busy={isSaving}
         >
@@ -587,9 +645,17 @@ const CreateRouteForm = ({ newRoute, setNewRoute, onCreateRoute, isSaving, regio
     </div>
 );
 
-const RouteStats = ({ routeLength, estimatedTime, points }) => (
+// ----------------------------------------------------------------------
+// Updated RouteStats component (version added)
+// ----------------------------------------------------------------------
+const RouteStats = ({ routeLength, estimatedTime, points, version, onViewHistory }) => (
     <div style={styles.card}>
-        <div style={styles.cardTitle}>Route Information</div>
+        <div style={styles.cardTitle}>
+            Route Information
+            <button onClick={onViewHistory} style={styles.versionButton}>
+                Version {version} • View History
+            </button>
+        </div>
         <div style={styles.statsGrid}>
             <div style={styles.statCard}>
                 <div style={styles.statContent}>
@@ -638,7 +704,6 @@ const RegionAssignment = ({ activeRoute, activeRouteId, updateRoute, regions }) 
     </div>
 );
 
-// Route Appearance Card – updates route_color
 const RouteAppearanceCard = ({ activeRoute, activeRouteId, updateRoute }) => (
     <div style={styles.card}>
         <div style={styles.cardTitle}>Route Appearance</div>
@@ -653,7 +718,28 @@ const RouteAppearanceCard = ({ activeRoute, activeRouteId, updateRoute }) => (
     </div>
 );
 
-const RouteStatusCard = ({ activeRoute, activeRouteId, updateRoute }) => {
+const RouteStatusCard = ({ activeRoute, activeRouteId, updateRoute, showToast }) => {
+    const handleCreditChange = async (newStatus) => {
+        if (newStatus === activeRoute.credit_status) return;
+        const delta = newStatus === 'credited' ? 1 : (newStatus === 'credit_revoked' ? -1 : 0);
+        try {
+            const { error } = await supabase.rpc('adjust_route_credit', {
+                p_route_id: activeRouteId,
+                p_credit_delta: delta,
+                p_new_credit_confidence: activeRoute.credit_confidence || 0,
+                p_resolution_method: 'approved_with_adjustments',
+                p_credit_reason: activeRoute.credit_reason || null
+            });
+            if (error) throw error;
+
+            updateRoute(activeRouteId, (route) => ({ ...route, credit_status: newStatus }));
+            if (showToast) showToast('Credit status updated', 3000);
+        } catch (error) {
+            console.error('Credit adjustment failed:', error);
+            if (showToast) showToast('Credit update failed', 3000);
+        }
+    };
+
     return (
         <div style={styles.card}>
             <div style={styles.cardTitle}>Route Status & Credit</div>
@@ -679,12 +765,7 @@ const RouteStatusCard = ({ activeRoute, activeRouteId, updateRoute }) => {
                 <div style={styles.label}>Credit Status</div>
                 <select
                     value={activeRoute.credit_status || "uncredited"}
-                    onChange={(e) =>
-                        updateRoute(activeRouteId, (route) => ({
-                            ...route,
-                            credit_status: e.target.value,
-                        }))
-                    }
+                    onChange={(e) => handleCreditChange(e.target.value)}
                     style={styles.select}
                 >
                     <option value="uncredited">Uncredited</option>
@@ -833,6 +914,130 @@ const PointsList = ({
 );
 
 // ----------------------------------------------------------------------
+// Version History Modal (new)
+// ----------------------------------------------------------------------
+const VersionHistoryModal = ({ routeId, onClose }) => {
+    const [versions, setVersions] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchVersions = async () => {
+            setLoading(true);
+            const { data, error } = await supabase
+                .rpc('get_route_version_history', { p_route_id: routeId });
+            if (error) {
+                console.error("Error fetching version history:", error);
+            } else {
+                setVersions(data || []);
+            }
+            setLoading(false);
+        };
+        fetchVersions();
+    }, [routeId]);
+
+    return (
+        <div style={modalOverlayStyle}>
+            <div style={modalContentStyle}>
+                <div style={modalHeaderStyle}>
+                    <h3>Version History</h3>
+                    <button onClick={onClose} style={modalCloseButton}>×</button>
+                </div>
+                <div style={modalBodyStyle}>
+                    {loading ? (
+                        <div>Loading...</div>
+                    ) : versions.length === 0 ? (
+                        <div>No version history available.</div>
+                    ) : (
+                        <table style={versionTableStyle}>
+                            <thead>
+                            <tr>
+                                <th>Version</th>
+                                <th>Date</th>
+                                <th>Changed By</th>
+                                <th>Change Type</th>
+                                <th>Resolution</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {versions.map(v => (
+                                <tr key={v.version_number}>
+                                    <td>{v.version_number}</td>
+                                    <td>{new Date(v.recorded_at).toLocaleString()}</td>
+                                    <td>{v.actor_name || "System"}</td>
+                                    <td>{v.change_type.replace(/_/g, ' ')}</td>
+                                    <td>{v.resolution_method || "—"}</td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const modalOverlayStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2000,
+};
+
+const modalContentStyle = {
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    width: '80%',
+    maxWidth: '800px',
+    maxHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+};
+
+const modalHeaderStyle = {
+    padding: '1rem',
+    borderBottom: '1px solid #e2e8f0',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+};
+
+const modalCloseButton = {
+    background: 'none',
+    border: 'none',
+    fontSize: '1.5rem',
+    cursor: 'pointer',
+    color: '#64748b',
+};
+
+const modalBodyStyle = {
+    padding: '1rem',
+    overflowY: 'auto',
+};
+
+const versionTableStyle = {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: '0.875rem',
+    '& th, & td': {
+        padding: '0.75rem',
+        textAlign: 'left',
+        borderBottom: '1px solid #e2e8f0',
+    },
+    '& th': {
+        backgroundColor: '#f8fafc',
+        fontWeight: 600,
+    },
+};
+
+// ----------------------------------------------------------------------
 // Main RouteEditor Component
 // ----------------------------------------------------------------------
 export function RouteEditor({
@@ -859,9 +1064,14 @@ export function RouteEditor({
     const [isSnapping, setIsSnapping] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [simplifyTolerance, setSimplifyTolerance] = useState(0.0001);
-    const [isUpdatingGraph, setIsUpdatingGraph] = useState(false); // optional
+    const [isUpdatingGraph, setIsUpdatingGraph] = useState(false);
+    const [showVersionHistory, setShowVersionHistory] = useState(false);   // new
 
-    // Refs
+    // Toast
+    const { toast, showToast } = useToast();
+
+    // Refs for cleanup
+    const abortControllerRef = useRef(null);
     const clickHandlerRef = useRef(null);
     const contentRef = useRef(null);
 
@@ -873,7 +1083,7 @@ export function RouteEditor({
 
     // Custom hooks
     const pointEditing = usePointEditing(activeRoute?.rawPoints || []);
-    const { clearVisuals, updateVisuals } = useRouteVisualization(
+    const { clearVisuals, updateVisuals, showTempPopup } = useRouteVisualization(
         map,
         pointEditing.points,
         activeRouteId,
@@ -904,44 +1114,174 @@ export function RouteEditor({
         updateVisuals();
     }, [updateVisuals]);
 
-    // Distance to segment
-    const distanceToSegment = useCallback((point, segmentStart, segmentEnd) => {
-        const [px, py] = point;
-        const [x1, y1] = segmentStart;
-        const [x2, y2] = segmentEnd;
-
-        const A = px - x1;
-        const B = py - y1;
-        const C = x2 - x1;
-        const D = y2 - y1;
-
-        const dot = A * C + B * D;
-        const lenSq = C * C + D * D;
-        let param = -1;
-
-        if (lenSq !== 0) param = dot / lenSq;
-
-        let xx, yy;
-
-        if (param < 0) {
-            xx = x1;
-            yy = y1;
-        } else if (param > 1) {
-            xx = x2;
-            yy = y2;
-        } else {
-            xx = x1 + param * C;
-            yy = y1 + param * D;
-        }
-
-        const dx = px - xx;
-        const dy = py - yy;
-        return Math.sqrt(dx * dx + dy * dy);
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+        };
     }, []);
 
-    // --------------------------------------------------------------------
-    // NEW: Trigger Edge Function to update route_graph_nodes
-    // --------------------------------------------------------------------
+    // UPDATED: createRoute using RPC
+    const createRoute = useCallback(async () => {
+        if (!newRoute.name.trim() || !newRoute.code.trim() || !newRoute.regionId) {
+            showToast("Please enter route name, code, and select a region", 3000);
+            return;
+        }
+
+        try {
+            setIsSaving(true);
+
+            const { data: newRouteId, error } = await supabase.rpc('create_route_with_history', {
+                p_route_code: newRoute.code.trim(),
+                p_route_name: newRoute.name.trim(),
+                p_region_id: newRoute.regionId,
+                p_route_color: newRoute.color || '#0066CC',
+                p_geometry: { type: 'LineString', coordinates: [] }
+            });
+
+            if (error) throw error;
+
+            // Fetch the newly created route
+            const { data: newRouteDb, error: fetchError } = await supabase
+                .from('routes')
+                .select('*, region:region_id(*)')
+                .eq('id', newRouteId)
+                .single();
+
+            if (fetchError) throw fetchError;
+
+            const editorRoute = {
+                id: newRouteDb.id,
+                name: newRouteDb.geometry?.properties?.name || newRouteDb.route_code,
+                code: newRouteDb.route_code,
+                color: newRouteDb.route_color || '#0066CC',
+                rawPoints: newRouteDb.geometry?.coordinates || [],
+                regionId: newRouteDb.region_id,
+                regionName: newRouteDb.region?.name,
+                status: newRouteDb.status,
+                length_meters: newRouteDb.length_meters,
+                created_at: newRouteDb.created_at,
+                updated_at: newRouteDb.updated_at,
+                credit_status: newRouteDb.credit_status,
+                credited_by_operator_id: newRouteDb.credited_by_operator_id,
+                credited_at: newRouteDb.credited_at,
+                credit_confidence: newRouteDb.credit_confidence,
+                credit_reason: newRouteDb.credit_reason,
+                version: newRouteDb.version || 1,   // include version
+            };
+
+            setRoutes((prev) => [editorRoute, ...prev]);
+            setActiveRouteId(newRouteDb.id);
+            setNewRoute({ name: "", code: "", regionId: "", color: "#0066CC" });
+            pointEditing.resetPoints([]);
+            setAddMode('off');
+
+            showToast(`Route "${newRoute.name.trim()}" created`, 3000);
+        } catch (error) {
+            console.error("Error creating route:", error);
+            showToast(`Failed: ${error.message}`, 5000);
+        } finally {
+            setIsSaving(false);
+        }
+    }, [newRoute, setRoutes, setActiveRouteId, pointEditing, showToast]);
+
+    const deleteRoute = useCallback(
+        async (id) => {
+            if (
+                !window.confirm(
+                    "Are you sure you want to delete this route? This action cannot be undone."
+                )
+            )
+                return;
+
+            try {
+                await deleteRouteFromDatabase(id);
+                if (activeRouteId === id) {
+                    pointEditing.resetPoints([]);
+                    setAddMode('off');
+                }
+                showToast("Route deleted", 3000);
+            } catch (error) {
+                console.error("Error deleting route:", error);
+                showToast("Failed to delete route", 5000);
+            }
+        },
+        [activeRouteId, deleteRouteFromDatabase, pointEditing, showToast]
+    );
+
+    const pointsEqual = (p1, p2) => JSON.stringify(p1) === JSON.stringify(p2);
+
+    // UPDATED: saveRoute using the RPC (via saveRouteToDatabase prop)
+    const saveRoute = useCallback(async () => {
+        if (!activeRoute || pointEditing.points.length < 2) {
+            showToast("Route must have at least 2 points", 3000);
+            return;
+        }
+
+        if (pointsEqual(pointEditing.points, activeRoute.rawPoints)) {
+            showToast("No changes to save", 3000);
+            return;
+        }
+
+        try {
+            setIsSaving(true);
+
+            const routeToSave = {
+                ...activeRoute,
+                rawPoints: pointEditing.points,
+                length_meters: routeLength * 1000,
+            };
+
+            await saveRouteToDatabase(routeToSave);
+            showToast("Route saved successfully", 3000);
+        } catch (error) {
+            console.error("Error saving route:", error);
+            showToast(`Failed to save route: ${error.message}`, 5000);
+        } finally {
+            setIsSaving(false);
+        }
+    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength, showToast]);
+
+    // UPDATED: updateRoute with credit adjustment detection
+    const updateRoute = useCallback(
+        (id, updater) => {
+            const currentRoute = routes.find(r => r.id === id);
+            const updatedRoute = updater(currentRoute);
+
+            setRoutes((prev) => prev.map((r) => (r.id === id ? updatedRoute : r)));
+
+            if (currentRoute?.credit_status !== updatedRoute.credit_status) {
+                (async () => {
+                    try {
+                        let delta = 0;
+                        if (updatedRoute.credit_status === 'credited' && currentRoute?.credit_status !== 'credited') delta = 1;
+                        else if (updatedRoute.credit_status === 'credit_revoked' && currentRoute?.credit_status === 'credited') delta = -1;
+
+                        const { error } = await supabase.rpc('adjust_route_credit', {
+                            p_route_id: id,
+                            p_credit_delta: delta,
+                            p_new_credit_confidence: updatedRoute.credit_confidence || 0,
+                            p_resolution_method: 'approved_with_adjustments',
+                            p_credit_reason: updatedRoute.credit_reason || null
+                        });
+
+                        if (error) throw error;
+                        showToast('Credit status updated', 3000);
+                    } catch (error) {
+                        console.error('Error updating credit:', error);
+                        showToast('Credit update failed', 3000);
+                        setRoutes((prev) => prev.map((r) => (r.id === id ? currentRoute : r)));
+                    }
+                })();
+            }
+        },
+        [routes, showToast]
+    );
+
+    // ... (triggerRouteGraphUpdate, handleMapClick, snapToRoad, simplifyRoutePoints, exportRoute remain unchanged) ...
+
     const triggerRouteGraphUpdate = useCallback(async (routeId) => {
         if (!routeId) return;
         try {
@@ -958,42 +1298,35 @@ export function RouteEditor({
             if (!response.ok) {
                 const errorData = await response.json();
                 console.error('Failed to update route graph:', errorData);
-                // Optionally show a non‑blocking warning
+                showToast('Graph update failed', 3000);
             } else {
                 const result = await response.json();
                 console.log(`Route graph updated: ${result.count} nodes linked`);
+                showToast('Graph updated', 2000);
             }
         } catch (err) {
             console.error('Error calling edge function:', err);
+            showToast('Graph update error', 3000);
         } finally {
             setIsUpdatingGraph(false);
         }
-    }, []);
+    }, [showToast]);
 
-    // --------------------------------------------------------------------
-    // Enhanced Map Click Handler – respects addMode
-    // --------------------------------------------------------------------
     const handleMapClick = useCallback(
         (e) => {
             if (!map || !activeRouteId || addMode === 'off') return;
 
             const { lng, lat } = e.lngLat;
-            let insertAtIndex = -1; // default append
+            let insertAtIndex = -1;
 
-            // Mode 1: Add to Start
             if (addMode === 'start') {
                 insertAtIndex = 0;
-            }
-            // Mode 2: Add to End
-            else if (addMode === 'end') {
+            } else if (addMode === 'end') {
                 insertAtIndex = -1;
-            }
-            // Mode 3: Smart Insert/Extend
-            else if (addMode === 'insert') {
+            } else if (addMode === 'insert') {
                 const points = pointEditing.points;
                 const clickThreshold = 0.0001;
 
-                // --- Extend at start (click before first point) ---
                 if (points.length >= 2) {
                     const [x1, y1] = points[0];
                     const [x2, y2] = points[1];
@@ -1013,7 +1346,6 @@ export function RouteEditor({
                     }
                 }
 
-                // --- Extend at end (click after last point) ---
                 if (insertAtIndex === -1 && points.length >= 2) {
                     const [x1, y1] = points[points.length - 2];
                     const [x2, y2] = points[points.length - 1];
@@ -1029,7 +1361,6 @@ export function RouteEditor({
                     }
                 }
 
-                // --- Insert between two points ---
                 if (insertAtIndex === -1 && points.length >= 2) {
                     for (let i = 0; i < points.length - 1; i++) {
                         const dist = distanceToSegment([lng, lat], points[i], points[i + 1]);
@@ -1040,7 +1371,6 @@ export function RouteEditor({
                     }
                 }
 
-                // If still -1, append as fallback
                 if (insertAtIndex === -1) {
                     insertAtIndex = -1;
                 }
@@ -1048,35 +1378,29 @@ export function RouteEditor({
 
             pointEditing.addPoint(lng, lat, insertAtIndex);
 
-            // Visual feedback
-            if (map) {
-                let message = "Point added";
-                if (insertAtIndex === 0) message = "Added at start";
-                else if (insertAtIndex === -1) message = "Added at end";
-                else message = "Point inserted";
+            let message = "Point added";
+            if (insertAtIndex === 0) message = "Added at start";
+            else if (insertAtIndex === -1) message = "Added at end";
+            else message = "Point inserted";
 
-                const popup = new mapboxgl.Popup({ closeButton: false })
-                    .setLngLat([lng, lat])
-                    .setHTML(`<div style="padding: 4px; font-size: 12px; background: ${activeRoute?.color || '#0066CC'}; color: white; border-radius: 4px;">${message}</div>`)
-                    .addTo(map);
-                setTimeout(() => popup.remove(), 1000);
-            }
+            showTempPopup([lng, lat], message, activeRoute?.color || '#0066CC');
         },
-        [addMode, activeRouteId, map, pointEditing, distanceToSegment, activeRoute?.color]
+        [addMode, activeRouteId, map, pointEditing, showTempPopup, activeRoute?.color]
     );
 
-    // --------------------------------------------------------------------
-    // Snap to Road
-    // --------------------------------------------------------------------
     const snapToRoad = useCallback(async () => {
         if (pointEditing.points.length < 2) {
-            alert("At least 2 points are required to snap to roads");
+            showToast("At least 2 points are required to snap to roads", 3000);
             return;
         }
 
-        setIsSnapping(true);
-        let abortController = new AbortController();
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+        const { signal } = abortControllerRef.current;
 
+        setIsSnapping(true);
         try {
             const coordinates = pointEditing.points
                 .map(p => `${p[0]},${p[1]}`)
@@ -1090,7 +1414,7 @@ export function RouteEditor({
 
             const response = await fetch(
                 `https://api.mapbox.com/matching/v5/mapbox/driving/${coordinates}?access_token=${accessToken}&geometries=geojson&steps=true&overview=simplified`,
-                { signal: abortController.signal }
+                { signal }
             );
 
             if (!response.ok) {
@@ -1112,50 +1436,38 @@ export function RouteEditor({
             const snappedCoordinates = data.matchings[0].geometry.coordinates;
             pointEditing.resetPoints(snappedCoordinates);
 
-            if (map) {
-                const popup = new mapboxgl.Popup({ closeButton: false })
-                    .setLngLat(snappedCoordinates[Math.floor(snappedCoordinates.length / 2)])
-                    .setHTML('<div style="padding: 8px; background: #10B981; color: white; border-radius: 4px;">✓ Route snapped successfully</div>')
-                    .addTo(map);
-
-                setTimeout(() => popup.remove(), 3000);
-            }
+            showToast("✓ Route snapped successfully", 3000);
         } catch (error) {
             if (error.name === 'AbortError') {
                 console.log('Snap request cancelled');
                 return;
             }
             console.error('Error snapping to road:', error);
-            alert(`Failed to snap to roads: ${error.message}`);
+            showToast(`Failed to snap to roads: ${error.message}`, 5000);
         } finally {
             setIsSnapping(false);
+            abortControllerRef.current = null;
         }
-    }, [pointEditing, map]);
+    }, [pointEditing, showToast]);
 
-    // --------------------------------------------------------------------
-    // Simplify Route
-    // --------------------------------------------------------------------
     const simplifyRoutePoints = useCallback(() => {
         if (pointEditing.points.length < 3) {
-            alert("Route needs at least 3 points to simplify");
+            showToast("Route needs at least 3 points to simplify", 3000);
             return;
         }
 
         const simplified = simplifyRoute(pointEditing.points, simplifyTolerance);
         if (simplified.length < pointEditing.points.length) {
             pointEditing.resetPoints(simplified);
-            alert(`Simplified from ${pointEditing.points.length} to ${simplified.length} points`);
+            showToast(`Simplified from ${pointEditing.points.length} to ${simplified.length} points`, 3000);
         } else {
-            alert("No simplification possible with current tolerance");
+            showToast("No simplification possible with current tolerance", 3000);
         }
-    }, [pointEditing, simplifyTolerance]);
+    }, [pointEditing, simplifyTolerance, showToast]);
 
-    // --------------------------------------------------------------------
-    // Export Route
-    // --------------------------------------------------------------------
     const exportRoute = useCallback(async (format = 'geojson') => {
         if (pointEditing.points.length < 2) {
-            alert("Route must have at least 2 points to export");
+            showToast("Route must have at least 2 points to export", 3000);
             return;
         }
 
@@ -1208,170 +1520,14 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            alert(`Route exported as ${format.toUpperCase()}`);
+            showToast(`Route exported as ${format.toUpperCase()}`, 3000);
         } catch (error) {
             console.error('Error exporting route:', error);
-            alert(`Failed to export route: ${error.message}`);
+            showToast(`Failed to export route: ${error.message}`, 5000);
         } finally {
             setIsExporting(false);
         }
-    }, [pointEditing.points, activeRoute, routeLength]);
-
-    // --------------------------------------------------------------------
-    // Route CRUD – uses route_color column
-    // --------------------------------------------------------------------
-    const createRoute = useCallback(async () => {
-        if (!newRoute.name.trim() || !newRoute.code.trim()) {
-            alert("Please enter route name and code");
-            return;
-        }
-
-        try {
-            setIsSaving(true);
-            const {
-                data: { user },
-            } = await supabase.auth.getUser();
-            if (!user) {
-                alert("Please log in to create routes.");
-                return;
-            }
-
-            const routeData = {
-                route_code: newRoute.code.trim(),
-                origin_type: "field",
-                proposed_by_user_id: user.id,
-                status: "draft",
-                route_color: newRoute.color || "#0066CC", // 👈 new column
-                geometry: {
-                    type: "LineString",
-                    coordinates: [],
-                    properties: {
-                        name: newRoute.name.trim()
-                        // color removed
-                    },
-                },
-                region_id: newRoute.regionId || null,
-                length_meters: 0,
-                last_geometry_update_at: new Date().toISOString(),
-                credit_status: "uncredited",
-                credit_confidence: 0,
-                credited_by_operator_id: null,
-                credited_at: null,
-            };
-
-            const { data: newRouteDb, error } = await supabase
-                .from("routes")
-                .insert([routeData])
-                .select(
-                    `
-                    *,
-                    region:region_id (
-                        region_id,
-                        name,
-                        code
-                    )
-                `
-                )
-                .single();
-
-            if (error) throw error;
-
-            const editorRoute = {
-                id: newRouteDb.id,
-                name: newRoute.name.trim(),
-                code: newRouteDb.route_code,
-                color: newRouteDb.route_color, // 👈 read from column
-                rawPoints: [],
-                regionId: newRouteDb.region_id,
-                regionName: newRouteDb.region?.name,
-                status: newRouteDb.status,
-                length_meters: newRouteDb.length_meters,
-                created_at: newRouteDb.created_at,
-                updated_at: newRouteDb.updated_at,
-                credit_status: newRouteDb.credit_status,
-                credited_by_operator_id: newRouteDb.credited_by_operator_id,
-                credited_at: newRouteDb.credited_at,
-                credit_confidence: newRouteDb.credit_confidence,
-                credit_reason: newRouteDb.credit_reason,
-                geometry: newRouteDb.geometry
-            };
-
-            setRoutes((prev) => [editorRoute, ...prev]);
-            setActiveRouteId(newRouteDb.id);
-            setNewRoute({ name: "", code: "", regionId: "", color: "#0066CC" });
-            pointEditing.resetPoints([]);
-            setAddMode('off');
-
-            alert(`Route "${newRoute.name.trim()}" created`);
-        } catch (error) {
-            console.error("Error creating route:", error);
-            alert(`Failed: ${error.message}`);
-        } finally {
-            setIsSaving(false);
-        }
-    }, [newRoute, setRoutes, setActiveRouteId, pointEditing]);
-
-    const deleteRoute = useCallback(
-        async (id) => {
-            if (
-                !window.confirm(
-                    "Are you sure you want to delete this route? This action cannot be undone."
-                )
-            )
-                return;
-
-            try {
-                await deleteRouteFromDatabase(id);
-                if (activeRouteId === id) {
-                    pointEditing.resetPoints([]);
-                    setAddMode('off');
-                }
-                alert("Route deleted");
-            } catch (error) {
-                console.error("Error deleting route:", error);
-                alert("Failed to delete route");
-            }
-        },
-        [activeRouteId, deleteRouteFromDatabase, pointEditing]
-    );
-
-    // --------------------------------------------------------------------
-    // Modified saveRoute – now calls triggerRouteGraphUpdate after success
-    // --------------------------------------------------------------------
-    const saveRoute = useCallback(async () => {
-        if (!activeRoute || pointEditing.points.length < 2) {
-            alert("Route must have at least 2 points");
-            return;
-        }
-
-        try {
-            setIsSaving(true);
-
-            const routeToSave = {
-                ...activeRoute,
-                rawPoints: pointEditing.points,
-                length_meters: routeLength * 1000,
-            };
-
-            await saveRouteToDatabase(routeToSave);
-            alert("Route saved successfully");
-
-            // Trigger graph update for this route
-            await triggerRouteGraphUpdate(activeRoute.id);
-        } catch (error) {
-            console.error("Error saving route:", error);
-            alert(`Failed to save route: ${error.message}`);
-        } finally {
-            setIsSaving(false);
-        }
-    }, [activeRoute, saveRouteToDatabase, pointEditing.points, routeLength, triggerRouteGraphUpdate]);
-
-    const updateRoute = useCallback(
-        (id, updater) => {
-            setRoutes((prev) => prev.map((r) => (r.id === id ? updater(r) : r)));
-        },
-        [setRoutes]
-    );
+    }, [pointEditing.points, activeRoute, routeLength, showToast]);
 
     // Map interaction setup
     useEffect(() => {
@@ -1387,6 +1543,10 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
             map.getCanvas().style.cursor = "crosshair";
 
             const handleKeyDown = (e) => {
+                const target = e.target;
+                const isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+                if (isInput) return;
+
                 if (e.key === "Escape") {
                     setAddMode('off');
                 } else if (e.ctrlKey && e.key === "z") {
@@ -1429,6 +1589,22 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                 canUndo={pointEditing.canUndo}
                 canRedo={pointEditing.canRedo}
             />
+
+            {isUpdatingGraph && (
+                <div style={{
+                    position: 'fixed',
+                    top: '10px',
+                    right: '10px',
+                    background: '#0066CC',
+                    color: 'white',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    zIndex: 1000,
+                }}>
+                    Updating graph…
+                </div>
+            )}
 
             <div ref={contentRef} style={styles.content}>
                 {activeRoute && (
@@ -1479,6 +1655,8 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                             routeLength={routeLength}
                             estimatedTime={estimatedTime}
                             points={pointEditing.points}
+                            version={activeRoute.version || 1}
+                            onViewHistory={() => setShowVersionHistory(true)}
                         />
 
                         <RegionAssignment
@@ -1498,6 +1676,7 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                             activeRoute={activeRoute}
                             activeRouteId={activeRouteId}
                             updateRoute={updateRoute}
+                            showToast={showToast}
                         />
 
                         <PointsList
@@ -1512,12 +1691,21 @@ ${pointEditing.points.map(([lng, lat]) => `      <trkpt lat="${lat}" lon="${lng}
                     </>
                 )}
             </div>
+
+            <Toast message={toast.message} visible={toast.visible} style={styles.toast} />
+
+            {showVersionHistory && activeRoute && (
+                <VersionHistoryModal
+                    routeId={activeRoute.id}
+                    onClose={() => setShowVersionHistory(false)}
+                />
+            )}
         </div>
     );
 }
 
 // ----------------------------------------------------------------------
-// Styles
+// Styles (original, with versionButton added)
 // ----------------------------------------------------------------------
 const styles = {
     container: {
@@ -1620,6 +1808,29 @@ const styles = {
         gap: '8px',
         flexWrap: 'wrap'
     },
+    quickActionButton: {
+        flex: 1,
+        minWidth: '120px',
+        background: '#0066CC',
+        color: '#FFFFFF',
+        border: 'none',
+        padding: '10px 16px',
+        borderRadius: '6px',
+        fontSize: '13px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        '&:hover': {
+            opacity: 0.9
+        },
+        '&:disabled': {
+            opacity: 0.6,
+            cursor: 'not-allowed'
+        }
+    },
     advancedTools: {
         background: '#FFFFFF',
         borderRadius: '6px',
@@ -1703,29 +1914,6 @@ const styles = {
         },
         '&:disabled': {
             opacity: 0.5,
-            cursor: 'not-allowed'
-        }
-    },
-    quickActionButton: {
-        flex: 1,
-        minWidth: '120px',
-        background: '#0066CC',
-        color: '#FFFFFF',
-        border: 'none',
-        padding: '10px 16px',
-        borderRadius: '6px',
-        fontSize: '13px',
-        fontWeight: 500,
-        cursor: 'pointer',
-        transition: 'background 0.2s',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        '&:hover': {
-            opacity: 0.9
-        },
-        '&:disabled': {
-            opacity: 0.6,
             cursor: 'not-allowed'
         }
     },
@@ -2005,7 +2193,6 @@ const styles = {
             boxShadow: '0 0 0 2px rgba(0,102,204,0.1)'
         }
     },
-    // Color picker styles
     colorPickerRow: {
         display: 'flex',
         alignItems: 'center',
@@ -2023,31 +2210,6 @@ const styles = {
         fontFamily: 'monospace',
         fontSize: '13px',
         color: '#1E293B',
-    },
-    // Dropdown styles
-    dropdownMenu: {
-        position: 'absolute',
-        top: '100%',
-        left: 0,
-        width: '100%',
-        background: 'white',
-        border: '1px solid #CBD5E1',
-        borderRadius: '4px',
-        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-        zIndex: 10,
-        marginTop: '2px'
-    },
-    dropdownItem: {
-        width: '100%',
-        padding: '8px 12px',
-        border: 'none',
-        background: 'white',
-        textAlign: 'left',
-        fontSize: '13px',
-        cursor: 'pointer',
-        '&:hover': {
-            background: '#F1F5F9'
-        }
     },
     creditInfo: {
         marginTop: "12px",
@@ -2069,5 +2231,32 @@ const styles = {
         color: "#14532D",
         marginBottom: "4px",
         wordBreak: "break-all",
+    },
+    toast: {
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        background: '#1E293B',
+        color: 'white',
+        padding: '12px 20px',
+        borderRadius: '6px',
+        boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+        zIndex: 1000,
+        fontSize: '14px',
+        maxWidth: '300px',
+    },
+    // New style for the version button
+    versionButton: {
+        background: 'none',
+        border: '1px solid #0066CC',
+        color: '#0066CC',
+        padding: '4px 8px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        cursor: 'pointer',
+        marginLeft: '12px',
+        ':hover': {
+            background: '#E6F0FF',
+        },
     },
 };

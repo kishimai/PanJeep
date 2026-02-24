@@ -17,6 +17,7 @@ import {
 // ---------- INITIAL STATE ----------
 const initialState = {
     routes: [],
+    pois: [],                // <-- new
     loading: true,
     refreshing: false,
     userLocation: null,
@@ -30,15 +31,26 @@ const initialState = {
 // ---------- REDUCER ----------
 function reducer(state, action) {
     switch (action.type) {
-        case 'SET_ROUTES': return { ...state, routes: action.payload };
-        case 'SET_LOADING': return { ...state, loading: action.payload };
-        case 'SET_REFRESHING': return { ...state, refreshing: action.payload };
-        case 'SET_USER_LOCATION': return { ...state, userLocation: action.payload };
-        case 'SET_ACTIVE_ROUTE': return { ...state, activeRoute: action.payload };
-        case 'SET_MAP_REGION': return { ...state, mapRegion: action.payload, initialRegionSet: true };
-        case 'SET_REGION_MAP': return { ...state, regionMap: action.payload };
-        case 'SET_BOTTOM_SHEET_EXPANDED': return { ...state, bottomSheetExpanded: action.payload };
-        default: return state;
+        case 'SET_ROUTES':
+            return { ...state, routes: action.payload };
+        case 'SET_POIS':                     // <-- new
+            return { ...state, pois: action.payload };
+        case 'SET_LOADING':
+            return { ...state, loading: action.payload };
+        case 'SET_REFRESHING':
+            return { ...state, refreshing: action.payload };
+        case 'SET_USER_LOCATION':
+            return { ...state, userLocation: action.payload };
+        case 'SET_ACTIVE_ROUTE':
+            return { ...state, activeRoute: action.payload };
+        case 'SET_MAP_REGION':
+            return { ...state, mapRegion: action.payload, initialRegionSet: true };
+        case 'SET_REGION_MAP':
+            return { ...state, regionMap: action.payload };
+        case 'SET_BOTTOM_SHEET_EXPANDED':
+            return { ...state, bottomSheetExpanded: action.payload };
+        default:
+            return state;
     }
 }
 
@@ -144,6 +156,52 @@ export const useRouteData = () => {
         dispatch({ type: 'SET_MAP_REGION', payload: region });
     }, []);
 
+    // ---------- LOAD POIs ----------
+    const loadPOIs = useCallback(async () => {
+        if (isOffline) return;
+
+        try {
+            const { data, error } = await supabase
+                .from('points_of_interest')
+                .select('id, type, name, geometry, metadata, region_id')
+                .limit(500); // prevent map overcrowding
+
+            if (error) throw error;
+
+            const transformedPOIs = (data || [])
+                .map(poi => {
+                    if (!poi.geometry) return null;
+
+                    const geom = typeof poi.geometry === 'string'
+                        ? JSON.parse(poi.geometry)
+                        : poi.geometry;
+
+                    // Expect a Point geometry with [lng, lat] coordinates
+                    if (geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+                        return {
+                            id: poi.id,
+                            type: poi.type,
+                            name: poi.name,
+                            coordinate: {
+                                longitude: geom.coordinates[0],
+                                latitude: geom.coordinates[1],
+                            },
+                            metadata: poi.metadata,
+                            region_id: poi.region_id,
+                        };
+                    }
+                    return null;
+                })
+                .filter(p => p !== null);
+
+            if (isMounted.current) {
+                dispatch({ type: 'SET_POIS', payload: transformedPOIs });
+            }
+        } catch (error) {
+            console.warn('Failed to load POIs:', error);
+        }
+    }, [isOffline]);
+
     // ---------- LOAD ROUTES ----------
     const loadRoutes = useCallback(async (showLoading = true) => {
         if (loadingRef.current) return;
@@ -205,6 +263,8 @@ export const useRouteData = () => {
                         useNativeDriver: true,
                     }).start();
                 }
+                // Load POIs after routes
+                loadPOIs();
             }
         } catch (error) {
             console.error('Error loading routes:', error);
@@ -236,7 +296,25 @@ export const useRouteData = () => {
                     createdAt: new Date().toISOString(),
                     hasValidCoordinates: true,
                 }];
+
+                // Mock POIs
+                const mockPOIs = [
+                    {
+                        id: 'poi-1',
+                        type: 'terminal',
+                        name: 'Terminal A',
+                        coordinate: { latitude: 14.5995, longitude: 120.9842 },
+                    },
+                    {
+                        id: 'poi-2',
+                        type: 'stop',
+                        name: 'Bus Stop',
+                        coordinate: { latitude: 14.6095, longitude: 120.9942 },
+                    },
+                ];
+
                 dispatch({ type: 'SET_ROUTES', payload: mockRoutes });
+                dispatch({ type: 'SET_POIS', payload: mockPOIs });
                 if (!state.initialRegionSet) setInitialMapRegion(mockRoutes);
             }
         } finally {
@@ -246,7 +324,7 @@ export const useRouteData = () => {
                 dispatch({ type: 'SET_REFRESHING', payload: false });
             }
         }
-    }, [loadRegions, setInitialMapRegion, state.initialRegionSet]);
+    }, [loadRegions, setInitialMapRegion, state.initialRegionSet, loadPOIs]);
 
     // ---------- ACTIONS ----------
     const toggleBottomSheet = useCallback(() => {

@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import AccountManagement from "../src/AccountManagement";
 import { RouteManager } from "../src/RouteManager.jsx";
 import { RegionManagement } from "../src/RegionManagement.jsx";
+import { DataQuality } from "../src/DataQuality";
 
 export function OperatorDashboard({ profile }) {
     const operatorTabs = [
@@ -32,6 +33,8 @@ export function OperatorDashboard({ profile }) {
                 );
             case "region-management":
                 return <RegionManagement />
+            case "data-quality":
+                return <DataQuality />;
 
             default:
                 return (
