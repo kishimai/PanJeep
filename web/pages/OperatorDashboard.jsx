@@ -1,10 +1,14 @@
 import { useState, useMemo } from "react";
+import { useProfile } from "../src/ProfileContext"; // adjust path if needed
 import AccountManagement from "../src/AccountManagement";
 import { RouteManager } from "../src/RouteManager.jsx";
 import { RegionManagement } from "../src/RegionManagement.jsx";
 import { DataQuality } from "../src/DataQuality";
 
 export function OperatorDashboard({ profile }) {
+    const { signOut } = useProfile(); // Get signOut from context
+    const [signingOut, setSigningOut] = useState(false);
+
     const operatorTabs = [
         { id: "summary", label: "Summary" },
         { id: "route-overview", label: "Route Overview" },
@@ -21,6 +25,19 @@ export function OperatorDashboard({ profile }) {
             activeTab === "route-overview",
         [activeTab]);
 
+    const handleSignOut = async () => {
+        setSigningOut(true);
+        try {
+            await signOut();
+            // No need to navigate – the PublicRoute in App will redirect automatically
+        } catch (error) {
+            console.error('Sign out error:', error);
+            alert('Failed to sign out. Please try again.');
+        } finally {
+            setSigningOut(false);
+        }
+    };
+
     const renderContent = () => {
         switch(activeTab) {
             case "account-management":
@@ -32,10 +49,9 @@ export function OperatorDashboard({ profile }) {
                     </div>
                 );
             case "region-management":
-                return <RegionManagement />
+                return <RegionManagement />;
             case "data-quality":
                 return <DataQuality />;
-
             default:
                 return (
                     <div style={placeholderStyle}>
@@ -86,6 +102,16 @@ export function OperatorDashboard({ profile }) {
                             <span style={roleValueStyle}>{profile.role}</span>
                         </div>
                     )}
+
+                    {/* Sign Out Button */}
+                    <button
+                        onClick={handleSignOut}
+                        disabled={signingOut}
+                        style={signOutButtonStyle}
+                    >
+                        {signingOut ? 'Signing out...' : 'Sign Out'}
+                    </button>
+
                     <div style={lastLoginStyle}>
                         <small style={footerTextStyle}>
                             Last login: {new Date().toLocaleDateString('en-US', {
@@ -126,6 +152,31 @@ export function OperatorDashboard({ profile }) {
         </div>
     );
 }
+
+// Add this new style object for the sign-out button
+const signOutButtonStyle = {
+    width: '100%',
+    padding: '0.625rem 0.75rem',
+    marginBottom: '0.75rem',
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+    border: '1px solid rgba(220, 38, 38, 0.3)',
+    borderRadius: '6px',
+    color: '#f87171',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    outline: 'none',
+    ':hover': {
+        backgroundColor: 'rgba(220, 38, 38, 0.2)',
+        borderColor: '#ef4444',
+        color: '#fee2e2'
+    },
+    ':disabled': {
+        opacity: 0.5,
+        cursor: 'not-allowed'
+    }
+};
 
 // --- Professional Dashboard Styles ---
 const dashboardStyle = {

@@ -706,16 +706,13 @@ export function RouteManager({ operatorId }) {
     // UPDATED: deleteRouteFromDatabase (soft delete - optionally add history logging later)
     const deleteRouteFromDatabase = useCallback(async (routeId) => {
         try {
-            const { error } = await supabase
-                .from('routes')
-                .update({
-                    deleted_at: new Date().toISOString(),
-                    status: 'deprecated'
-                })
-                .eq('id', routeId);
+            const { error } = await supabase.rpc('soft_delete_route', {
+                p_route_id: routeId
+            });
 
             if (error) throw error;
 
+            // Remove from local state
             setRoutes(prev => prev.filter(r => r.id !== routeId));
 
             if (selectedRouteId === routeId) {
