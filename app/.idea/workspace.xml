@@ -5,9 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="54f70619-1484-4ec8-bcea-9b5e10d4fc19" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/babel.config.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/home.passenger.jsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/_layout.jsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/components/passenger/hooks/useRouteData.js" beforeDir="false" afterPath="$PROJECT_DIR$/components/passenger/hooks/useRouteData.js" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -68,8 +69,8 @@
 }</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\Guest1\Desktop\Projects\PanJeep\app\components\passenger\hooks" />
       <recent name="C:\Users\Guest1\Desktop\Projects\PanJeep\app" />
+      <recent name="C:\Users\Guest1\Desktop\Projects\PanJeep\app\components\passenger\hooks" />
     </key>
   </component>
   <component name="SharedIndexes">
@@ -110,6 +111,9 @@
       <workItem from="1771708774964" duration="619000" />
       <workItem from="1771744228578" duration="5917000" />
       <workItem from="1771872571181" duration="141000" />
+      <workItem from="1772016505800" duration="1209000" />
+      <workItem from="1772037722030" duration="5106000" />
+      <workItem from="1772122951425" duration="11966000" />
     </task>
     <servers />
   </component>

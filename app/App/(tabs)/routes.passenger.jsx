@@ -7,14 +7,14 @@ import {
     TouchableOpacity,
     StatusBar,
     Platform,
-    Animated,
     RefreshControl,
-    TextInput,
     Alert,
     ActivityIndicator,
     LayoutAnimation,
+    PanResponder,
+    Animated as RNAnimated,
 } from 'react-native';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Polyline, Marker } from 'react-native-maps';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -94,35 +94,6 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 // ---------- ROUTE HELPERS ----------
-const getDistanceToRoute = (point, routePoints) => {
-    if (!routePoints || routePoints.length < 2) return Infinity;
-    let minDist = Infinity;
-    for (let i = 0; i < routePoints.length - 1; i++) {
-        const d = distancePointToSegment(point, routePoints[i], routePoints[i + 1]);
-        if (d < minDist) minDist = d;
-    }
-    return minDist;
-};
-
-const distancePointToSegment = (p, a, b) => {
-    const { x: px, y: py } = { x: p.longitude, y: p.latitude };
-    const { x: ax, y: ay } = { x: a.longitude, y: a.latitude };
-    const { x: bx, y: by } = { x: b.longitude, y: b.latitude };
-
-    const abx = bx - ax;
-    const aby = by - ay;
-    const apx = px - ax;
-    const apy = py - ay;
-
-    const t = (apx * abx + apy * aby) / (abx * abx + aby * aby || 1);
-    const tClamped = Math.max(0, Math.min(1, t));
-
-    const nearestX = ax + tClamped * abx;
-    const nearestY = ay + tClamped * aby;
-
-    return haversineDistance(p.latitude, p.longitude, nearestY, nearestX);
-};
-
 const findNearestStopIndex = (point, stops) => {
     let minDist = Infinity;
     let minIndex = -1;
@@ -175,46 +146,44 @@ const OfflineIndicator = React.memo(({ isOffline }) => {
     );
 });
 
+// Updated RouteCard with safe passenger handling
 const RouteCard = React.memo(({ route, isActive, onPress }) => {
     const getRouteTypeColor = useCallback((type) => COLORS.routeType[type] || COLORS.text.tertiary, []);
     const getRouteTypeLabel = useCallback((type) => type === 'community' ? 'COM' : type === 'field' ? 'FLD' : 'SYS', []);
+
+    // Safely determine capacity
+    let capacityValue = 10;
+    let capacityText = '10-20';
+
+    if (route.passengers) {
+        const passengersStr = String(route.passengers);
+        capacityText = passengersStr;
+        const firstNumber = parseInt(passengersStr.split('-')[0], 10);
+        if (!isNaN(firstNumber)) {
+            capacityValue = firstNumber;
+        }
+    }
+
+    const capacityStyle = capacityValue < 15 ? styles.capacityLight : capacityValue > 25 ? styles.capacityHeavy : styles.capacityMedium;
+
     return (
         <TouchableOpacity style={[styles.routeCard, isActive && styles.routeCardActive]} onPress={onPress} activeOpacity={0.9}>
-            <View style={styles.routeCardContent}>
-                <View style={styles.routeCardHeader}>
-                    <View style={styles.routeCodeContainer}>
-                        {/* Route color dot */}
-                        <View style={[styles.routeColorDot, { backgroundColor: route.route_color || '#0066CC' }]} />
-                        <Text style={styles.routeCardCode}>{route.code}</Text>
-                        <View style={styles.routeTypeTag}>
-                            <Text style={[styles.routeTypeText, { color: getRouteTypeColor(route.originType) }]}>
-                                {getRouteTypeLabel(route.originType)}
-                            </Text>
-                        </View>
-                    </View>
-                    <View style={styles.routeDetails}>
-                        <View style={styles.detailItem}>
-                            <MaterialIcons name="schedule" size={12} color={COLORS.text.tertiary} />
-                            <Text style={styles.detailText}>{route.estimatedTime}</Text>
-                        </View>
-                        <View style={styles.detailItem}>
-                            <MaterialIcons name="attach-money" size={12} color={COLORS.text.tertiary} />
-                            <Text style={styles.detailText}>{route.fare}</Text>
-                        </View>
+            <View style={styles.routeBadge}>
+                <Text style={styles.routeCode}>{route.code}</Text>
+            </View>
+            <View style={styles.routeInfo}>
+                <View style={styles.routeHeader}>
+                    <Text style={styles.routeDestination}>{route.region || 'Jeepney Route'}</Text>
+                    <View style={[styles.routeTypeTag, { backgroundColor: getRouteTypeColor(route.originType) + '20' }]}>
+                        <Text style={[styles.routeTypeText, { color: getRouteTypeColor(route.originType) }]}>
+                            {getRouteTypeLabel(route.originType)}
+                        </Text>
                     </View>
                 </View>
-                <View style={styles.routeCardFooter}>
-                    <View style={styles.footerItem}>
-                        <MaterialIcons name="star" size={12} color={COLORS.status.warning} />
-                        <Text style={styles.footerText}>{route.rating}</Text>
-                    </View>
-                    <View style={styles.footerItem}>
-                        <Feather name="users" size={12} color={COLORS.text.tertiary} />
-                        <Text style={styles.footerText}>{route.passengers}</Text>
-                    </View>
-                    <View style={styles.footerItem}>
-                        <Feather name="map-pin" size={12} color={COLORS.text.tertiary} />
-                        <Text style={styles.footerText}>{route.region}</Text>
+                <View style={styles.routeMeta}>
+                    <Text style={styles.routeTime}>{route.estimatedTime}</Text>
+                    <View style={[styles.capacityTag, capacityStyle]}>
+                        <Text style={styles.capacityTagText}>{capacityText}</Text>
                     </View>
                 </View>
             </View>
@@ -222,7 +191,7 @@ const RouteCard = React.memo(({ route, isActive, onPress }) => {
     );
 });
 
-// MapRoutes – draws route segments (with glow) and walking circles
+// MapRoutes component (unchanged)
 const MapRoutes = React.memo(({
                                   routes,
                                   activeRoute,
@@ -238,82 +207,58 @@ const MapRoutes = React.memo(({
                                   hidePois = false,
                                   onRegionChangeComplete
                               }) => {
+    console.log('MapRoutes received:', routes.map(r => ({ id: r.id, code: r.code, color: r.route_color, points: r.normalizedPoints?.length })));
+
     const routeLines = useMemo(() => {
         const polylines = [];
-        const routesToShow = hideRoutes
-            ? routes.filter(r => directionsSegments?.some(ds => ds.routeId === r.id))
+
+        const routesToShow = hideRoutes && directionsSegments
+            ? routes.filter(r => directionsSegments.some(ds => ds.routeId === r.id))
             : routes;
 
         routesToShow.forEach(route => {
-            if (!route.normalizedPoints?.length) return;
+            if (!route.normalizedPoints || route.normalizedPoints.length < 2) return;
 
+            let coordinatesToDraw = route.normalizedPoints;
             if (hideRoutes && directionsSegments) {
-                directionsSegments
-                    .filter(ds => ds.routeId === route.id)
-                    .forEach((ds, idx) => {
-                        const { startIndex, endIndex } = ds;
-                        if (startIndex >= 0 && endIndex < route.normalizedPoints.length && startIndex < endIndex) {
-                            const coordinates = route.normalizedPoints.slice(startIndex, endIndex + 1);
-                            const routeColor = route.route_color || COLORS.map.active;
-
-                            polylines.push(
-                                <Polyline
-                                    key={`route-${route.id}-${idx}-glow`}
-                                    coordinates={coordinates}
-                                    strokeColor={routeColor}
-                                    strokeWidth={10}
-                                    strokeOpacity={0.3}
-                                    lineCap="round"
-                                    lineJoin="round"
-                                    zIndex={5}
-                                />
-                            );
-                            polylines.push(
-                                <Polyline
-                                    key={`route-${route.id}-${idx}`}
-                                    coordinates={coordinates}
-                                    strokeColor={routeColor}
-                                    strokeWidth={6}
-                                    strokeOpacity={1}
-                                    lineCap="round"
-                                    lineJoin="round"
-                                    zIndex={6}
-                                />
-                            );
-                        }
-                    });
-            } else {
-                const isActive = activeRoute === route.id;
-                const routeColor = route.route_color || (isActive ? COLORS.map.active : COLORS.map.route);
-
-                if (isActive) {
-                    polylines.push(
-                        <Polyline
-                            key={`route-${route.id}-glow`}
-                            coordinates={route.normalizedPoints}
-                            strokeColor={routeColor}
-                            strokeWidth={10}
-                            strokeOpacity={0.3}
-                            lineCap="round"
-                            lineJoin="round"
-                            zIndex={5}
-                        />
-                    );
+                const segment = directionsSegments.find(ds => ds.routeId === route.id);
+                if (segment && segment.startIndex >= 0 && segment.endIndex < route.normalizedPoints.length && segment.startIndex < segment.endIndex) {
+                    coordinatesToDraw = route.normalizedPoints.slice(segment.startIndex, segment.endIndex + 1);
                 }
+            }
+
+            const routeColor = route.route_color || '#0066CC';
+            const isActive = activeRoute === route.id || (hideRoutes && directionsSegments?.some(ds => ds.routeId === route.id));
+
+            if (isActive) {
                 polylines.push(
                     <Polyline
-                        key={`route-${route.id}`}
-                        coordinates={route.normalizedPoints}
+                        key={`glow-${route.id}`}
+                        coordinates={coordinatesToDraw}
                         strokeColor={routeColor}
-                        strokeWidth={isActive ? 6 : 4}
-                        strokeOpacity={isActive ? 1 : 0.9}
+                        strokeWidth={10}
+                        strokeOpacity={0.3}
                         lineCap="round"
                         lineJoin="round"
-                        zIndex={isActive ? 6 : 4}
+                        zIndex={5}
                     />
                 );
             }
+
+            polylines.push(
+                <Polyline
+                    key={`main-${route.id}`}
+                    coordinates={coordinatesToDraw}
+                    strokeColor={routeColor}
+                    strokeWidth={isActive ? 6 : 4}
+                    strokeOpacity={isActive ? 1 : 0.9}
+                    lineCap="round"
+                    lineJoin="round"
+                    zIndex={isActive ? 6 : 4}
+                />
+            );
         });
+
         return polylines;
     }, [routes, activeRoute, directionsSegments, hideRoutes]);
 
@@ -332,9 +277,9 @@ const MapRoutes = React.memo(({
             }
             return (
                 <Marker key={`poi-${poi.id}`} coordinate={poi.coordinate} anchor={{ x: 0.5, y: 0.5 }}>
-                    <Animated.View style={[styles.poiMarker, { backgroundColor, opacity: markerOpacity }]}>
+                    <RNAnimated.View style={[styles.poiMarker, { backgroundColor, opacity: markerOpacity }]}>
                         <MaterialIcons name={iconName} size={16} color="#FFFFFF" />
-                    </Animated.View>
+                    </RNAnimated.View>
                 </Marker>
             );
         });
@@ -363,11 +308,17 @@ const MapRoutes = React.memo(({
         return circles;
     }, [walkingPaths]);
 
+    const mapProps = Platform.select({
+        ios: { userInterfaceStyle: 'light' },
+        android: {},
+        default: {},
+    });
+
     return (
         <MapView
             ref={mapRef}
             style={styles.map}
-            provider={PROVIDER_GOOGLE}
+            {...mapProps}
             showsUserLocation
             showsMyLocationButton={false}
             showsCompass
@@ -385,19 +336,35 @@ const MapRoutes = React.memo(({
             onRegionChangeComplete={onRegionChangeComplete}
         >
             {routeLines}
+            {walkingPaths && walkingPaths.length > 0 && walkingPaths.map((path, idx) => {
+                if (!path || path.length < 2) return null;
+                return (
+                    <Polyline
+                        key={`walk-poly-${idx}`}
+                        coordinates={path}
+                        strokeColor="#4A90E2"
+                        strokeWidth={4}
+                        strokeOpacity={0.8}
+                        lineCap="round"
+                        lineJoin="round"
+                        zIndex={7}
+                        lineDashPattern={[5, 5]}
+                    />
+                );
+            })}
             {poiMarkers}
             {userLocation && (
                 <Marker coordinate={userLocation} anchor={{ x: 0.5, y: 0.5 }} zIndex={15}>
-                    <Animated.View style={[styles.userLocationMarker, { opacity: markerOpacity }]}>
+                    <RNAnimated.View style={[styles.userLocationMarker, { opacity: markerOpacity }]}>
                         <View style={styles.userLocationInner} />
-                    </Animated.View>
+                    </RNAnimated.View>
                 </Marker>
             )}
             {selectedLocation && (
                 <Marker coordinate={selectedLocation} anchor={{ x: 0.5, y: 0.5 }} zIndex={15}>
-                    <Animated.View style={[styles.poiMarker, { backgroundColor: '#EF4444', opacity: markerOpacity }]}>
+                    <RNAnimated.View style={[styles.poiMarker, { backgroundColor: '#EF4444', opacity: markerOpacity }]}>
                         <MaterialIcons name="place" size={16} color="#FFFFFF" />
-                    </Animated.View>
+                    </RNAnimated.View>
                 </Marker>
             )}
             {walkingCircles}
@@ -507,10 +474,6 @@ export default function PassengerRoutes() {
         state,
         isOffline,
         mapRef,
-        bottomSheetRef,
-        bottomSheetHeight,
-        fadeAnim,
-        toggleBottomSheet,
         focusOnRoute,
         centerOnUser,
         onRefresh,
@@ -529,14 +492,85 @@ export default function PassengerRoutes() {
     const [pendingDestinationId, setPendingDestinationId] = useState(null);
     const [directionsSegments, setDirectionsSegments] = useState([]);
 
-    const [markerOpacity] = useState(new Animated.Value(1));
+    const [markerOpacity] = useState(new RNAnimated.Value(1));
     const prevSelectedLocationRef = useRef(null);
     const params = useMemo(() => route.params || {}, [route.params]);
+
+    // ---------- Bottom Sheet with Offset‑Based Dragging ----------
+    const HEADER_HEIGHT = 60;
+    const EXTRA_VISIBLE = 30;
+    const MAX_SHEET_VISIBLE = 0.7 * SCREEN_HEIGHT;
+    const SHEET_HEIGHT = MAX_SHEET_VISIBLE;
+
+    const MINIMAL_SNAP = SHEET_HEIGHT - HEADER_HEIGHT - EXTRA_VISIBLE;
+    const MODERATE_SNAP = SHEET_HEIGHT * 0.4;
+    const EXPANDED_SNAP = 0;
+
+    const snapPoints = [MINIMAL_SNAP, MODERATE_SNAP, EXPANDED_SNAP];
+    const [snapIndex, setSnapIndex] = useState(1);
+
+    const translateY = useRef(new RNAnimated.Value(snapPoints[snapIndex])).current;
+    const offsetY = useRef(0);
+
+    const panResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: (evt, gestureState) => {
+                if (snapIndex === 2) {
+                    const sheetTop = SCREEN_HEIGHT - SHEET_HEIGHT + translateY._value;
+                    const localY = gestureState.y0 - sheetTop;
+                    return localY < HEADER_HEIGHT;
+                }
+                return true;
+            },
+            onMoveShouldSetPanResponder: (evt, gestureState) => {
+                return Math.abs(gestureState.dy) > 2;
+            },
+            onPanResponderGrant: () => {
+                offsetY.current = translateY._value;
+            },
+            onPanResponderMove: (evt, gestureState) => {
+                let newY = offsetY.current + gestureState.dy;
+                newY = Math.min(MAX_SHEET_VISIBLE, Math.max(0, newY));
+                translateY.setValue(newY);
+            },
+            onPanResponderRelease: (evt, gestureState) => {
+                const currentY = translateY._value;
+                let targetIndex = 0;
+                let minDiff = Math.abs(currentY - snapPoints[0]);
+                for (let i = 1; i < snapPoints.length; i++) {
+                    const diff = Math.abs(currentY - snapPoints[i]);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        targetIndex = i;
+                    }
+                }
+                setSnapIndex(targetIndex);
+                RNAnimated.spring(translateY, {
+                    toValue: snapPoints[targetIndex],
+                    useNativeDriver: true,
+                    damping: 20,
+                    stiffness: 200,
+                }).start();
+            },
+        })
+    ).current;
+
+    const toggleSheet = () => {
+        const nextIndex = (snapIndex + 1) % snapPoints.length;
+        setSnapIndex(nextIndex);
+        RNAnimated.spring(translateY, {
+            toValue: snapPoints[nextIndex],
+            useNativeDriver: true,
+            damping: 20,
+            stiffness: 200,
+        }).start();
+    };
+    // ---------- End Bottom Sheet ----------
 
     const updateMarkerOpacity = useCallback((region) => {
         const zoomLevel = Math.log2(360 / region.latitudeDelta);
         const opacity = zoomLevel < 11 ? 0 : Math.min(1, (zoomLevel - 11) / 4);
-        Animated.timing(markerOpacity, { toValue: opacity, duration: 200, useNativeDriver: true }).start();
+        RNAnimated.timing(markerOpacity, { toValue: opacity, duration: 200, useNativeDriver: true }).start();
     }, [markerOpacity]);
 
     useEffect(() => {
@@ -564,6 +598,7 @@ export default function PassengerRoutes() {
     }, [pendingDestinationId, state.loading, state.routes]);
 
     const fetchJeepneyDirections = useCallback(async (poiId) => {
+        // ... (your existing implementation – unchanged) ...
         console.log('[fetchJeepneyDirections] Starting with poiId:', poiId);
         setDirectionsLoading(true);
         setWalkingPaths([]);
@@ -604,9 +639,8 @@ export default function PassengerRoutes() {
             setEndText(destName);
             setStartText('Current location');
 
-            const MAX_WALK = 2000; // meters – maximum walking distance to/from a stop or transfer
+            const MAX_WALK = 2000;
 
-            // Build candidate stops for user and destination (all routes, but only if walk ≤ MAX_WALK)
             const userStopCandidates = [];
             const destStopCandidates = [];
 
@@ -614,36 +648,21 @@ export default function PassengerRoutes() {
                 if (!route.normalizedPoints?.length) continue;
                 const stops = createSyntheticStops(route);
 
-                // User side
                 const userIdx = findNearestStopIndex(userCoord, stops);
                 const userWalk = haversineDistance(userCoord.latitude, userCoord.longitude, stops[userIdx].latitude, stops[userIdx].longitude);
                 if (userWalk <= MAX_WALK) {
-                    userStopCandidates.push({
-                        route,
-                        stopIndex: userIdx,
-                        stopCoord: stops[userIdx],
-                        walkDist: userWalk,
-                    });
+                    userStopCandidates.push({ route, stopIndex: userIdx, stopCoord: stops[userIdx], walkDist: userWalk });
                 }
 
-                // Destination side
                 const destIdx = findNearestStopIndex(destCoord, stops);
                 const destWalk = haversineDistance(destCoord.latitude, destCoord.longitude, stops[destIdx].latitude, stops[destIdx].longitude);
                 if (destWalk <= MAX_WALK) {
-                    destStopCandidates.push({
-                        route,
-                        stopIndex: destIdx,
-                        stopCoord: stops[destIdx],
-                        walkDist: destWalk,
-                    });
+                    destStopCandidates.push({ route, stopIndex: destIdx, stopCoord: stops[destIdx], walkDist: destWalk });
                 }
             }
 
-            const TRANSFER_DIST = 300; // meters – max walk between transfer stops
-            const WALK_SPEED = 80;      // m/min (not used in primary selection)
-            const JEEPNEY_SPEED = 250;
+            const TRANSFER_DIST = 300;
 
-            // 1. Find best single route (by total walking)
             let bestSingle = null;
             let bestSingleWalk = Infinity;
             let bestSingleRide = Infinity;
@@ -652,11 +671,11 @@ export default function PassengerRoutes() {
                 const stops = createSyntheticStops(route);
                 const userIdx = findNearestStopIndex(userCoord, stops);
                 const destIdx = findNearestStopIndex(destCoord, stops);
-                if (destIdx > userIdx) { // forward direction only
+                if (destIdx > userIdx) {
                     const walkTo = haversineDistance(userCoord.latitude, userCoord.longitude, stops[userIdx].latitude, stops[userIdx].longitude);
                     const walkFrom = haversineDistance(destCoord.latitude, destCoord.longitude, stops[destIdx].latitude, stops[destIdx].longitude);
                     const totalWalk = walkTo + walkFrom;
-                    if (totalWalk <= MAX_WALK * 2) { // optional: keep within reason
+                    if (totalWalk <= MAX_WALK * 2) {
                         const ride = estimateRideDistance(stops, userIdx, destIdx);
                         if (totalWalk < bestSingleWalk || (totalWalk === bestSingleWalk && ride < bestSingleRide)) {
                             bestSingleWalk = totalWalk;
@@ -677,19 +696,17 @@ export default function PassengerRoutes() {
                 }
             }
 
-            // 2. Find best transfer (by total walking)
             let bestTransfer = null;
             let bestTransferWalk = Infinity;
             let bestTransferRide = Infinity;
 
             for (const u of userStopCandidates) {
                 for (const d of destStopCandidates) {
-                    if (u.route.id === d.route.id) continue; // already handled by single
+                    if (u.route.id === d.route.id) continue;
 
                     const stopsA = createSyntheticStops(u.route);
                     const stopsB = createSyntheticStops(d.route);
 
-                    // Search for transfer stop pair: i on route A after boarding, j on route B before destination
                     for (let i = u.stopIndex + 1; i < stopsA.length; i++) {
                         const stopA = stopsA[i];
                         for (let j = 0; j < d.stopIndex; j++) {
@@ -732,11 +749,9 @@ export default function PassengerRoutes() {
                 }
             }
 
-            // 3. Choose option with least total walking
             if (bestSingle && (!bestTransfer || bestSingleWalk <= bestTransferWalk)) {
-                // Use single route
                 console.log('[fetchJeepneyDirections] Using single route (walk =', bestSingleWalk.toFixed(0), 'm)');
-                const { boardingStop, alightingStop, usedStops, userStopIndex, destStopIndex, walkToDist, walkFromDist, rideDist } = bestSingle;
+                const { boardingStop, alightingStop, userStopIndex, destStopIndex, walkToDist, walkFromDist, rideDist } = bestSingle;
 
                 const walkTo = await fetchWalkingRoute(
                     userCoord.latitude, userCoord.longitude,
@@ -771,12 +786,10 @@ export default function PassengerRoutes() {
 
                 const allPoints = [...walkTo, ...walkFrom];
                 mapRef.current?.fitToCoordinates(allPoints, { edgePadding: { top: 50, right: 50, bottom: 200, left: 50 }, animated: true });
-                if (!state.bottomSheetExpanded) setTimeout(() => toggleBottomSheet(), 500);
                 return;
             }
 
             if (bestTransfer) {
-                // Use transfer route
                 console.log('[fetchJeepneyDirections] Using transfer route (walk =', bestTransferWalk.toFixed(0), 'm)');
                 const walk1 = await fetchWalkingRoute(
                     userCoord.latitude, userCoord.longitude,
@@ -825,11 +838,9 @@ export default function PassengerRoutes() {
 
                 const allPoints = [...walk1, ...walkTransfer, ...walk2];
                 mapRef.current?.fitToCoordinates(allPoints, { edgePadding: { top: 50, right: 50, bottom: 200, left: 50 }, animated: true });
-                if (!state.bottomSheetExpanded) setTimeout(() => toggleBottomSheet(), 500);
                 return;
             }
 
-            // No route found
             setNoRouteFound(true);
             setDirectionsLoading(false);
         } catch (err) {
@@ -837,7 +848,7 @@ export default function PassengerRoutes() {
             Alert.alert('Error', 'Failed to calculate jeepney route.');
             setDirectionsLoading(false);
         }
-    }, [state.routes, mapRef, state.bottomSheetExpanded, toggleBottomSheet]);
+    }, [state.routes, mapRef]);
 
     const exitDirectionsMode = useCallback(() => {
         setMode('routes');
@@ -865,9 +876,12 @@ export default function PassengerRoutes() {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle={isOffline ? "light-content" : "dark-content"}
-                       backgroundColor={isOffline ? COLORS.status.error : "transparent"} translucent />
+            <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} translucent />
             <OfflineIndicator isOffline={isOffline} />
+
+            <TouchableOpacity style={styles.homeButton} onPress={goHome}>
+                <Feather name="home" size={24} color={COLORS.primary.main} />
+            </TouchableOpacity>
 
             {mode === 'directions' && (
                 <DirectionsHeader onBack={exitDirectionsMode} startText={startText} endText={endText}
@@ -896,40 +910,41 @@ export default function PassengerRoutes() {
                 </View>
             )}
 
-            <Animated.View style={[styles.bottomSheet, { height: bottomSheetHeight }]}>
-                <TouchableOpacity style={styles.sheetToggle} onPress={toggleBottomSheet} activeOpacity={0.7}>
+            <RNAnimated.View
+                style={[styles.bottomSheet, { height: SHEET_HEIGHT, transform: [{ translateY }] }]}
+                {...panResponder.panHandlers}
+            >
+                <View style={styles.sheetToggle}>
                     <View style={styles.toggleContent}>
-                        <View style={styles.toggleIcon}>
-                            <Feather name={state.bottomSheetExpanded ? "chevron-down" : "chevron-up"} size={22} color={COLORS.primary.main} />
-                        </View>
-                        <Text style={styles.toggleText}>
-                            {state.bottomSheetExpanded
-                                ? (mode === 'directions' ? 'Hide Steps' : 'Hide Routes')
-                                : (mode === 'directions' ? 'Show Steps' : 'Show Routes')}
-                        </Text>
+                        <TouchableOpacity onPress={toggleSheet} activeOpacity={0.7}>
+                            <View style={styles.toggleIcon}>
+                                <Feather
+                                    name={snapIndex === 2 ? "chevron-down" : "chevron-up"}
+                                    size={22}
+                                    color={COLORS.primary.main}
+                                />
+                            </View>
+                        </TouchableOpacity>
                         <View style={styles.headerButtons}>
                             {mode === 'routes' && !isOffline && state.routes.length > 0 && (
                                 <TouchableOpacity style={styles.headerButton} onPress={onRefresh} disabled={state.refreshing}>
-                                    <Feather name="refresh-cw" size={16} color={state.refreshing ? COLORS.primary.main : COLORS.text.secondary} />
+                                    <Feather name="refresh-cw" size={20} color={state.refreshing ? COLORS.primary.main : COLORS.text.secondary} />
                                 </TouchableOpacity>
                             )}
                             <TouchableOpacity style={styles.headerButton} onPress={centerOnUser} disabled={!state.userLocation}>
-                                <Feather name="navigation" size={16} color={state.userLocation ? COLORS.text.secondary : COLORS.text.tertiary} />
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.headerButton} onPress={goHome}>
-                                <Feather name="home" size={16} color={COLORS.text.secondary} />
+                                <Feather name="navigation" size={20} color={state.userLocation ? COLORS.text.secondary : COLORS.text.tertiary} />
                             </TouchableOpacity>
                         </View>
                     </View>
-                </TouchableOpacity>
+                </View>
 
                 <View style={styles.sheetContent}>
                     <ScrollView
-                        ref={bottomSheetRef}
                         style={styles.routesList}
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={styles.routesListContent}
                         scrollEventThrottle={16}
+                        scrollEnabled={snapIndex === 2}
                         refreshControl={mode === 'routes' && !isOffline ? (
                             <RefreshControl refreshing={state.refreshing} onRefresh={onRefresh} colors={[COLORS.primary.main]} tintColor={COLORS.primary.main} />
                         ) : undefined}
@@ -938,11 +953,11 @@ export default function PassengerRoutes() {
                             state.routes.length === 0 ? (
                                 <EmptyStateComponent isOffline={isOffline} onRetry={handleRetryConnection} />
                             ) : (
-                                <Animated.View style={{ opacity: fadeAnim }}>
+                                <View>
                                     {state.routes.map(route => (
                                         <RouteCard key={route.id} route={route} isActive={state.activeRoute === route.id} onPress={() => focusOnRoute(route)} />
                                     ))}
-                                </Animated.View>
+                                </View>
                             )
                         ) : (
                             steps.length === 0 ? (
@@ -965,153 +980,434 @@ export default function PassengerRoutes() {
                         )}
                     </ScrollView>
                 </View>
-            </Animated.View>
+            </RNAnimated.View>
         </View>
     );
 }
 
 // ---------- STYLES ----------
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.background },
-    map: { flex: 1 },
-    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
-    loadingContent: { alignItems: 'center', paddingHorizontal: 40 },
-    loadingIcon: { marginBottom: 20, opacity: 0.9 },
-    loadingTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary },
+    container: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    map: {
+        flex: 1,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+    },
+    loadingContent: {
+        alignItems: 'center',
+        paddingHorizontal: 40,
+    },
+    loadingTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: COLORS.text.primary,
+        marginTop: 16,
+    },
     offlineIndicator: {
-        position: 'absolute', top: Platform.OS === 'ios' ? 60 : 40, right: 20,
-        backgroundColor: COLORS.status.error, flexDirection: 'row', alignItems: 'center',
-        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, zIndex: 101,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 60 : 40,
+        right: 20,
+        backgroundColor: COLORS.status.error,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
+        zIndex: 101,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
     },
-    offlineText: { color: COLORS.text.light, fontSize: 12, fontWeight: '600', marginLeft: 6 },
+    offlineText: {
+        color: COLORS.text.light,
+        fontSize: 12,
+        fontWeight: '600',
+        marginLeft: 6,
+    },
+    homeButton: {
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 60 : 40,
+        left: 20,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'rgba(57, 160, 237, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+        zIndex: 100,
+    },
     userLocationMarker: {
-        width: 20, height: 20, borderRadius: 10,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
         backgroundColor: 'rgba(59, 130, 246, 0.3)',
-        justifyContent: 'center', alignItems: 'center',
-        borderWidth: 2, borderColor: COLORS.map.userLocation,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: COLORS.map.userLocation,
     },
-    userLocationInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.map.userLocation },
+    userLocationInner: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: COLORS.map.userLocation,
+    },
     poiMarker: {
-        width: 32, height: 32, borderRadius: 16,
-        justifyContent: 'center', alignItems: 'center',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
-        borderWidth: 2, borderColor: '#FFFFFF',
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
     },
     bottomSheet: {
-        position: 'absolute', bottom: 0, left: 0, right: 0,
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
         backgroundColor: COLORS.surface,
-        borderTopLeftRadius: 20, borderTopRightRadius: 20,
-        shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.08, shadowRadius: 20,
-        elevation: 8, zIndex: 95, overflow: 'hidden',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 20,
+        elevation: 8,
+        zIndex: 95,
+        overflow: 'hidden',
     },
-    sheetToggle: { paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border.light, backgroundColor: COLORS.surface },
-    toggleContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+    sheetToggle: {
+        paddingVertical: 16,
+        paddingHorizontal: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border.light,
+        backgroundColor: COLORS.surface,
+    },
+    toggleContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
     toggleIcon: {
-        width: 40, height: 40, borderRadius: 20,
-        backgroundColor: COLORS.primary.light,
-        justifyContent: 'center', alignItems: 'center', marginRight: 12,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(57, 160, 237, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    toggleText: { fontSize: 16, color: COLORS.text.primary, fontWeight: '600', flex: 1 },
-    headerButtons: { flexDirection: 'row', gap: 8 },
+    headerButtons: {
+        flexDirection: 'row',
+        gap: 12,
+    },
     headerButton: {
-        width: 36, height: 36, borderRadius: 18,
-        backgroundColor: COLORS.primary.light,
-        justifyContent: 'center', alignItems: 'center',
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(57, 160, 237, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    sheetContent: { flex: 1 },
-    routesList: { flex: 1 },
-    routesListContent: { paddingBottom: 40 },
+    sheetContent: {
+        flex: 1,
+    },
+    routesList: {
+        flex: 1,
+    },
+    routesListContent: {
+        paddingBottom: 40,
+    },
     routeCard: {
-        backgroundColor: COLORS.surface, padding: 16, marginHorizontal: 16, marginVertical: 6,
-        borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
-        borderWidth: 1, borderColor: COLORS.border.light,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0, 0, 0, 0.05)',
+        backgroundColor: COLORS.surface,
     },
     routeCardActive: {
-        backgroundColor: COLORS.primary.light, borderColor: COLORS.primary.main,
-        shadowColor: COLORS.primary.main, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
+        backgroundColor: 'rgba(57, 160, 237, 0.05)',
     },
-    routeCardContent: { gap: 12 },
-    routeCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-    routeCodeContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    routeCardCode: { fontSize: 18, fontWeight: '700', color: COLORS.text.primary },
-    routeTypeTag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: COLORS.border.light },
-    routeTypeText: { fontSize: 10, fontWeight: '700' },
-    routeDetails: { flexDirection: 'row', gap: 16 },
-    detailItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    detailText: { fontSize: 13, color: COLORS.text.secondary, fontWeight: '500' },
-    routeCardFooter: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-    footerItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    footerText: { fontSize: 13, color: COLORS.text.tertiary, fontWeight: '500' },
-    // Route color dot style
-    routeColorDot: {
-        width: 16,
-        height: 16,
+    routeBadge: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: 'rgba(57, 160, 237, 0.1)',
         borderRadius: 8,
-        marginRight: 4,
-        borderWidth: 1,
-        borderColor: COLORS.border.light,
+        minWidth: 48,
+        alignItems: 'center',
     },
-    emptyState: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 40 },
-    emptyTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text.primary, marginTop: 16, marginBottom: 8 },
-    emptyText: { fontSize: 14, color: COLORS.text.secondary, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
-    retryButton: { backgroundColor: COLORS.primary.light, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 },
-    retryButtonText: { color: COLORS.primary.main, fontWeight: '600', fontSize: 14 },
+    routeCode: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: COLORS.primary.main,
+    },
+    routeInfo: {
+        flex: 1,
+        marginLeft: 16,
+    },
+    routeHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    routeDestination: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: COLORS.text.primary,
+    },
+    routeTypeTag: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    routeTypeText: {
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    routeMeta: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    routeTime: {
+        fontSize: 14,
+        color: COLORS.text.secondary,
+    },
+    capacityTag: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    capacityLight: {
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    },
+    capacityMedium: {
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    },
+    capacityHeavy: {
+        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    },
+    capacityTagText: {
+        fontSize: 12,
+        color: COLORS.accent,
+        fontWeight: '600',
+    },
+    emptyState: {
+        alignItems: 'center',
+        paddingVertical: 60,
+        paddingHorizontal: 40,
+    },
+    emptyTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: COLORS.text.primary,
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    emptyText: {
+        fontSize: 14,
+        color: COLORS.text.secondary,
+        textAlign: 'center',
+        lineHeight: 20,
+        marginBottom: 24,
+    },
+    retryButton: {
+        backgroundColor: 'rgba(57, 160, 237, 0.1)',
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 12,
+    },
+    retryButtonText: {
+        color: COLORS.primary.main,
+        fontWeight: '600',
+        fontSize: 14,
+    },
     directionsHeader: {
-        position: 'absolute', top: Platform.OS === 'ios' ? 50 : 30, left: 20, right: 20,
-        flexDirection: 'row', alignItems: 'center', zIndex: 100,
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 50 : 30,
+        left: 20,
+        right: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 100,
     },
     backButton: {
-        width: 44, height: 44, borderRadius: 22,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         backgroundColor: COLORS.surface,
-        justifyContent: 'center', alignItems: 'center', marginRight: 12,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
     directionsCard: {
-        flex: 1, flexDirection: 'row', alignItems: 'center',
-        backgroundColor: COLORS.surface, borderRadius: 30,
-        paddingVertical: 6, paddingLeft: 16, paddingRight: 6,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 5,
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.surface,
+        borderRadius: 30,
+        paddingVertical: 6,
+        paddingLeft: 16,
+        paddingRight: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+        elevation: 5,
     },
-    locationRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    locationItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-    locationText: { fontSize: 14, color: COLORS.text.primary, fontWeight: '500', flexShrink: 1 },
-    verticalDivider: { width: 1, height: 24, backgroundColor: COLORS.border.medium, marginHorizontal: 8 },
+    locationRow: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    locationItem: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    locationText: {
+        fontSize: 14,
+        color: COLORS.text.primary,
+        fontWeight: '500',
+        flexShrink: 1,
+    },
+    verticalDivider: {
+        width: 1,
+        height: 24,
+        backgroundColor: COLORS.border.medium,
+        marginHorizontal: 8,
+    },
     goButton: {
-        backgroundColor: COLORS.primary.main, paddingHorizontal: 16, paddingVertical: 10,
-        borderRadius: 25, justifyContent: 'center', alignItems: 'center', minWidth: 60, marginLeft: 8,
+        backgroundColor: COLORS.primary.main,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 25,
+        justifyContent: 'center',
+        alignItems: 'center',
+        minWidth: 60,
+        marginLeft: 8,
     },
-    goButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+    goButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+        fontSize: 14,
+    },
     loadingOverlay: {
-        ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.7)',
-        justifyContent: 'center', alignItems: 'center', zIndex: 200,
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(255,255,255,0.7)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 200,
     },
-    stepsContainer: { paddingVertical: 16, paddingHorizontal: 16 },
-    stepContainer: { position: 'relative', marginLeft: 20, marginBottom: 16 },
+    stepsContainer: {
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+    },
+    stepContainer: {
+        position: 'relative',
+        marginLeft: 20,
+        marginBottom: 16,
+    },
     timelineLine: {
-        position: 'absolute', left: 20, top: 40, bottom: -16,
-        width: 2, backgroundColor: COLORS.border.medium, zIndex: 0,
+        position: 'absolute',
+        left: 20,
+        top: 40,
+        bottom: -16,
+        width: 2,
+        backgroundColor: COLORS.border.medium,
+        zIndex: 0,
     },
-    stepRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    stepRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
     stepIconContainer: {
-        width: 40, height: 40, borderRadius: 20,
-        justifyContent: 'center', alignItems: 'center', marginRight: 12,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3,
-        elevation: 2, zIndex: 2,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+        elevation: 2,
+        zIndex: 2,
     },
-    stepContent: { flex: 1, paddingBottom: 16 },
-    stepHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-    stepTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text.primary },
-    stepDuration: { fontSize: 14, color: COLORS.primary.main, fontWeight: '500' },
-    stepDetails: { flexDirection: 'row', gap: 12 },
-    stepDetailItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    stepDetailText: { fontSize: 12, color: COLORS.text.secondary },
+    stepContent: {
+        flex: 1,
+        paddingBottom: 16,
+    },
+    stepHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    stepTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: COLORS.text.primary,
+    },
+    stepDuration: {
+        fontSize: 14,
+        color: COLORS.primary.main,
+        fontWeight: '500',
+    },
+    stepDetails: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    stepDetailItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    stepDetailText: {
+        fontSize: 12,
+        color: COLORS.text.secondary,
+    },
     walkingCircle: {
-        width: 10, height: 10, borderRadius: 5,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
         backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        borderWidth: 1, borderColor: 'rgba(200, 225, 255, 0.8)',
-        shadowColor: '#A0C0FF', shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.8, shadowRadius: 4, elevation: 5,
+        borderWidth: 1,
+        borderColor: 'rgba(200, 225, 255, 0.8)',
+        shadowColor: '#A0C0FF',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8,
+        shadowRadius: 4,
+        elevation: 5,
     },
 });

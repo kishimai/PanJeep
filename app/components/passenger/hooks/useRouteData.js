@@ -14,10 +14,24 @@ import {
     calculateRouteSegments,
 } from '../utils';
 
+// Helper to generate a consistent color from a string (e.g., route code)
+const getColorFromCode = (code) => {
+    let hash = 0;
+    for (let i = 0; i < code.length; i++) {
+        hash = code.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let color = '#';
+    for (let i = 0; i < 3; i++) {
+        const value = (hash >> (i * 8)) & 0xFF;
+        color += ('00' + value.toString(16)).substr(-2);
+    }
+    return color;
+};
+
 // ---------- INITIAL STATE ----------
 const initialState = {
     routes: [],
-    pois: [],                // <-- new
+    pois: [],
     loading: true,
     refreshing: false,
     userLocation: null,
@@ -33,7 +47,7 @@ function reducer(state, action) {
     switch (action.type) {
         case 'SET_ROUTES':
             return { ...state, routes: action.payload };
-        case 'SET_POIS':                     // <-- new
+        case 'SET_POIS':
             return { ...state, pois: action.payload };
         case 'SET_LOADING':
             return { ...state, loading: action.payload };
@@ -164,7 +178,7 @@ export const useRouteData = () => {
             const { data, error } = await supabase
                 .from('points_of_interest')
                 .select('id, type, name, geometry, metadata, region_id')
-                .limit(500); // prevent map overcrowding
+                .limit(500);
 
             if (error) throw error;
 
@@ -176,7 +190,6 @@ export const useRouteData = () => {
                         ? JSON.parse(poi.geometry)
                         : poi.geometry;
 
-                    // Expect a Point geometry with [lng, lat] coordinates
                     if (geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
                         return {
                             id: poi.id,
@@ -213,12 +226,13 @@ export const useRouteData = () => {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) await supabase.auth.signInAnonymously();
 
+            // ✅ route_color is explicitly selected
             const { data, error } = await supabase
                 .from('routes')
                 .select(`
                     id, route_code, origin_type, status, geometry, length_meters, region_id,
                     passenger_usage_score, data_confidence_score, field_verification_score,
-                    driver_adoption_score, credit_status, created_at
+                    driver_adoption_score, credit_status, created_at, route_color
                 `)
                 .is('deleted_at', null)
                 .neq('status', 'deprecated')
@@ -230,6 +244,15 @@ export const useRouteData = () => {
             const transformedRoutes = (data || []).map(route => {
                 const rawCoords = extractCoordinates(route.geometry);
                 const normalizedPoints = normalizeCoordinates(rawCoords);
+
+                // Determine route color: use database value if present, otherwise generate from code
+                let routeColor = route.route_color;
+                if (!routeColor || !/^#[0-9A-F]{6}$/i.test(routeColor)) {
+                    // Fallback: generate from route code or use default blue
+                    routeColor = getColorFromCode(route.route_code || 'DEFAULT') || '#0066CC';
+                    console.log(`Route ${route.route_code} has no valid color, generated ${routeColor}`);
+                }
+
                 return {
                     id: route.id,
                     code: route.route_code || 'N/A',
@@ -250,8 +273,18 @@ export const useRouteData = () => {
                     creditStatus: route.credit_status || 'uncredited',
                     createdAt: route.created_at,
                     hasValidCoordinates: normalizedPoints.length > 0,
+                    route_color: routeColor,   // guaranteed non‑null string
                 };
             }).filter(r => r !== null);
+
+            // Log first route to verify color
+            if (transformedRoutes.length > 0) {
+                console.log('First route after transformation:', {
+                    id: transformedRoutes[0].id,
+                    code: transformedRoutes[0].code,
+                    color: transformedRoutes[0].route_color
+                });
+            }
 
             if (isMounted.current) {
                 dispatch({ type: 'SET_ROUTES', payload: transformedRoutes });
@@ -263,13 +296,12 @@ export const useRouteData = () => {
                         useNativeDriver: true,
                     }).start();
                 }
-                // Load POIs after routes
                 loadPOIs();
             }
         } catch (error) {
             console.error('Error loading routes:', error);
 
-            // Mock fallback for network errors
+            // Mock fallback for network errors – includes generated colors
             if (isMounted.current) {
                 const mockPoints = normalizeCoordinates([
                     [120.9842, 14.5995], [120.9942, 14.6095], [121.0042, 14.6195],
@@ -295,9 +327,9 @@ export const useRouteData = () => {
                     creditStatus: 'credited',
                     createdAt: new Date().toISOString(),
                     hasValidCoordinates: true,
+                    route_color: '#0066CC',   // Mock fallback color
                 }];
 
-                // Mock POIs
                 const mockPOIs = [
                     {
                         id: 'poi-1',
