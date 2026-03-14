@@ -1,42 +1,17 @@
-// lib/useProfile.js
+// app/lib/useProfile.js
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from './supabase';
-import { Session } from '@supabase/supabase-js';
 import { getOrCreateDeviceId } from './deviceId';
 
-export interface Profile {
-    id: string;
-    email: string | null;
-    role: string;
-    full_name: string | null;
-    phone: string | null;
-    is_guest: boolean;
-    device_id: string | null;
-    upgraded_from_guest: boolean;
-    avatar_url?: string | null;
-    created_at?: string;
-    updated_at?: string;
-}
+// Cache profiles by user ID or device ID
+const profileCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-interface UseProfileReturn {
-    profile: Profile | null;
-    loading: boolean;
-    error: Error | null;
-    refresh: () => Promise<void>;
-    updateProfile: (updates: Partial<Profile>) => Promise<{ success: boolean; error?: Error }>;
-}
-
-// Cache profiles by user ID or device ID (moved outside component)
-const profileCache = new Map<string, { profile: Profile | null; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache TTL
-
-// Helper function to clear all profile caches (moved outside hook)
-export function clearAllProfileCaches(): void {
+export function clearAllProfileCaches() {
     profileCache.clear();
 }
 
-// Helper to get profile by ID (moved outside hook)
-export async function getProfileById(userId: string): Promise<Profile | null> {
+export async function getProfileById(userId) {
     try {
         const cacheKey = `user:${userId}`;
         const cached = profileCache.get(cacheKey);
@@ -56,7 +31,6 @@ export async function getProfileById(userId: string): Promise<Profile | null> {
             return null;
         }
 
-        // Cache the result
         profileCache.set(cacheKey, {
             profile: data,
             timestamp: Date.now()
@@ -69,8 +43,7 @@ export async function getProfileById(userId: string): Promise<Profile | null> {
     }
 }
 
-// Initialize guest profile if needed (moved outside hook)
-export async function ensureGuestProfile(): Promise<Profile | null> {
+export async function ensureGuestProfile() {
     try {
         const deviceId = await getOrCreateDeviceId();
 
@@ -108,7 +81,6 @@ export async function ensureGuestProfile(): Promise<Profile | null> {
             return null;
         }
 
-        // Cache the new guest profile
         const cacheKey = `guest:${deviceId}`;
         profileCache.set(cacheKey, {
             profile: newProfile,
@@ -122,17 +94,16 @@ export async function ensureGuestProfile(): Promise<Profile | null> {
     }
 }
 
-// Helper functions that don't use hooks
-const getCacheKey = async (session: Session | null): Promise<string> => {
+async function getCacheKey(session) {
     if (session) {
         return `user:${session.user.id}`;
     } else {
         const deviceId = await getOrCreateDeviceId();
         return `guest:${deviceId}`;
     }
-};
+}
 
-const getFromCache = async (session: Session | null): Promise<Profile | null> => {
+async function getFromCache(session) {
     try {
         const key = await getCacheKey(session);
         const cached = profileCache.get(key);
@@ -141,7 +112,6 @@ const getFromCache = async (session: Session | null): Promise<Profile | null> =>
             return cached.profile;
         }
 
-        // Remove expired cache
         if (cached) {
             profileCache.delete(key);
         }
@@ -150,9 +120,9 @@ const getFromCache = async (session: Session | null): Promise<Profile | null> =>
     } catch (err) {
         return null;
     }
-};
+}
 
-const saveToCache = async (session: Session | null, profileData: Profile | null): Promise<void> => {
+async function saveToCache(session, profileData) {
     try {
         const key = await getCacheKey(session);
         profileCache.set(key, {
@@ -162,24 +132,23 @@ const saveToCache = async (session: Session | null, profileData: Profile | null)
     } catch (err) {
         console.warn('Failed to cache profile:', err);
     }
-};
+}
 
-const clearCache = async (session: Session | null): Promise<void> => {
+async function clearCache(session) {
     try {
         const key = await getCacheKey(session);
         profileCache.delete(key);
     } catch (err) {
         console.warn('Failed to clear cache:', err);
     }
-};
+}
 
-// Main hook
-export function useProfile(session: Session | null): UseProfileReturn {
-    const [profile, setProfile] = useState<Profile | null>(null);
+export function useProfile(session) {
+    const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
+    const [error, setError] = useState(null);
     const isMounted = useRef(true);
-    const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const refreshTimeoutRef = useRef(null);
 
     const fetchProfile = useCallback(async () => {
         if (!isMounted.current) return;
@@ -196,7 +165,7 @@ export function useProfile(session: Session | null): UseProfileReturn {
                 return;
             }
 
-            let profileData: Profile | null = null;
+            let profileData = null;
 
             if (!session) {
                 // Fetch guest profile by device ID
@@ -222,7 +191,7 @@ export function useProfile(session: Session | null): UseProfileReturn {
             } else {
                 // Fetch authenticated user profile with retry logic
                 let retries = 3;
-                let lastError: Error | null = null;
+                let lastError = null;
 
                 while (retries > 0) {
                     try {
@@ -244,7 +213,7 @@ export function useProfile(session: Session | null): UseProfileReturn {
                         profileData = data;
                         break; // Success, exit retry loop
                     } catch (err) {
-                        lastError = err instanceof Error ? err : new Error(String(err));
+                        lastError = err;
                         retries--;
 
                         if (retries > 0) {
@@ -279,7 +248,7 @@ export function useProfile(session: Session | null): UseProfileReturn {
         }
     }, [session]);
 
-    const updateProfile = useCallback(async (updates: Partial<Profile>) => {
+    const updateProfile = useCallback(async (updates) => {
         if (!profile?.id && !session?.user?.id) {
             return { success: false, error: new Error('No profile ID available for update') };
         }
@@ -301,8 +270,7 @@ export function useProfile(session: Session | null): UseProfileReturn {
                 throw new Error(`Profile update failed: ${updateError.message}`);
             }
 
-            // Update local state and cache
-            const updatedProfile = { ...profile, ...data } as Profile;
+            const updatedProfile = { ...profile, ...data };
 
             await saveToCache(session, updatedProfile);
 
@@ -339,13 +307,9 @@ export function useProfile(session: Session | null): UseProfileReturn {
                     table: 'users',
                     filter: `id=eq.${profile.id}`
                 },
-                async (payload) => {
-                    console.log('Profile changed:', payload);
-
-                    // Clear cache and refresh
+                async () => {
                     await clearCache(session);
 
-                    // Debounce refresh to avoid multiple rapid updates
                     if (refreshTimeoutRef.current) {
                         clearTimeout(refreshTimeoutRef.current);
                     }
@@ -379,13 +343,12 @@ export function useProfile(session: Session | null): UseProfileReturn {
     }, [fetchProfile]);
 
     // Refresh profile when session changes significantly
-    const previousSessionId = useRef<string | null>(null);
+    const previousSessionId = useRef(null);
 
     useEffect(() => {
         const currentSessionId = session?.user?.id;
 
         if (currentSessionId !== previousSessionId.current) {
-            // Session changed (login/logout), clear cache and refetch
             clearCache(session);
             fetchProfile();
             previousSessionId.current = currentSessionId;

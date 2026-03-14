@@ -5,11 +5,16 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="54f70619-1484-4ec8-bcea-9b5e10d4fc19" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/babel.config.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/lib/supabase.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/lib/useProfile.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/providers/AuthProvider.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/(tabs)/routes.passenger.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/App/_layout.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/_layout.jsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/components/passenger/hooks/useRouteData.js" beforeDir="false" afterPath="$PROJECT_DIR$/components/passenger/hooks/useRouteData.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/App/index.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/App/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/supabase.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/useProfile.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/providers/AuthProvider.tsx" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -51,19 +56,23 @@
   &quot;keyToString&quot;: {
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;javascript.preferred.runtime.type.id&quot;: &quot;node&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/Guest1/Desktop/Projects/PanJeep/app&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ajayh/Desktop/React Projects/PanJeep/app&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_interpreter_path&quot;: &quot;C:/Users/Guest1/AppData/Roaming/JetBrains/WebStorm2025.3/node/versions/20.15.0/node&quot;,
+    &quot;nodejs_interpreter_path&quot;: &quot;node&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;settings.javascript.runtime&quot;,
-    &quot;ts.external.directory.path&quot;: &quot;C:\\Users\\Guest1\\Desktop\\Projects\\PanJeep\\app\\node_modules\\typescript\\lib&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;ts.external.directory.path&quot;: &quot;C:\\Users\\ajayh\\Desktop\\React Projects\\PanJeep\\App\\node_modules\\typescript\\lib&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -76,7 +85,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-WS-253.29346.143" />
+        <option value="bundled-js-predefined-d6986cc7102b-3aa1da707db6-JavaScript-WS-252.26830.93" />
       </set>
     </attachedChunks>
   </component>
@@ -114,6 +123,13 @@
       <workItem from="1772016505800" duration="1209000" />
       <workItem from="1772037722030" duration="5106000" />
       <workItem from="1772122951425" duration="11966000" />
+      <workItem from="1773156450394" duration="2432000" />
+      <workItem from="1773159740553" duration="774000" />
+      <workItem from="1773297361293" duration="615000" />
+      <workItem from="1773297999310" duration="444000" />
+      <workItem from="1773298478819" duration="1669000" />
+      <workItem from="1773300210267" duration="4218000" />
+      <workItem from="1773456005116" duration="11522000" />
     </task>
     <servers />
   </component>
