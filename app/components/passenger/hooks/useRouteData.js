@@ -178,6 +178,7 @@ export const useRouteData = () => {
             const { data, error } = await supabase
                 .from('points_of_interest')
                 .select('id, type, name, geometry, metadata, region_id')
+                .eq('status', 'approved')  // Only approved POIs
                 .limit(500);
 
             if (error) throw error;

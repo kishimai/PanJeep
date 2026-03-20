@@ -149,7 +149,7 @@ export default function PassengerAccount() {
         );
     };
 
-    // --- Guest View (unchanged but with updated styling) ---
+    // --- Guest View ---
     if (isGuest) {
         return (
             <View style={styles.container}>
@@ -213,12 +213,12 @@ export default function PassengerAccount() {
         );
     }
 
-    // Stats (trips from passengerData, points/streak/level still mocked for now)
+    // Stats (trips from passengerData, others still placeholders)
     const stats = {
         trips: passengerData?.total_trips || 0,
-        points: 847,   // TODO: replace with real points
-        streak: 5,     // TODO: compute from daily activity
-        level: 2,      // TODO: derive from points
+        points: 847,
+        streak: 5,
+        level: 2,
     };
 
     return (
@@ -262,30 +262,41 @@ export default function PassengerAccount() {
                     <StatCard icon="navigation" value={stats.trips} label="Trips" color={COLORS.accent} />
                 </Animated.View>
 
-                {/* Quick Actions */}
-                <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-                    <Text style={styles.sectionTitle}>Quick Actions</Text>
-                    <View style={styles.actionsGrid}>
-                        <ActionButton
-                            icon="award"
-                            label="Rewards"
-                            onPress={() => router.push("/rewards")}
-                            color={COLORS.warning}
-                        />
-                        <ActionButton
-                            icon="settings"
-                            label="Settings"
-                            onPress={() => router.push("/settings")}
-                            color={COLORS.text.secondary}
-                        />
-                        <ActionButton
-                            icon="help-circle"
-                            label="Help"
-                            onPress={() => router.push("/help")}
-                            color={COLORS.text.secondary}
-                        />
-                    </View>
-                </Animated.View>
+                {/* ===== CONTRIBUTOR SECTION ===== */}
+                {!isGuest && profile?.is_contributor ? (
+                    <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+                        <TouchableOpacity
+                            style={styles.contributorCard}
+                            onPress={() => router.push('/contributor/dashboard')}
+                        >
+                            <View style={styles.contributorIcon}>
+                                <Feather name="award" size={24} color={COLORS.primary} />
+                            </View>
+                            <View style={styles.contributorText}>
+                                <Text style={styles.contributorTitle}>Contributor Dashboard</Text>
+                                <Text style={styles.contributorSubtitle}>Manage your submissions</Text>
+                            </View>
+                            <Feather name="chevron-right" size={20} color={COLORS.text.secondary} />
+                        </TouchableOpacity>
+                    </Animated.View>
+                ) : !isGuest && !profile?.is_contributor ? (
+                    <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+                        <TouchableOpacity
+                            style={styles.contributorCard}
+                            onPress={() => router.push('/contributor-application')}
+                        >
+                            <View style={styles.contributorIcon}>
+                                <Feather name="user-plus" size={24} color={COLORS.primary} />
+                            </View>
+                            <View style={styles.contributorText}>
+                                <Text style={styles.contributorTitle}>Become a Contributor</Text>
+                                <Text style={styles.contributorSubtitle}>Help map routes and POIs for your community</Text>
+                            </View>
+                            <Feather name="chevron-right" size={20} color={COLORS.text.secondary} />
+                        </TouchableOpacity>
+                    </Animated.View>
+                ) : null}
+                {/* ===== END CONTRIBUTOR SECTION ===== */}
 
                 {/* Recent Activity */}
                 <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
@@ -342,15 +353,6 @@ const StatCard = ({ icon, value, label, color }) => (
         <Text style={styles.statValue}>{value}</Text>
         <Text style={styles.statLabel}>{label}</Text>
     </View>
-);
-
-const ActionButton = ({ icon, label, onPress, color }) => (
-    <TouchableOpacity style={styles.actionButton} onPress={onPress} activeOpacity={0.7}>
-        <View style={[styles.actionIcon, { backgroundColor: `${color}10` }]}>
-            <Feather name={icon} size={18} color={color} />
-        </View>
-        <Text style={styles.actionLabel}>{label}</Text>
-    </TouchableOpacity>
 );
 
 const ActivityCard = ({ icon, title, time, color }) => (
@@ -566,33 +568,6 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
 
-    actionsGrid: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    actionButton: {
-        flex: 1,
-        backgroundColor: COLORS.surface,
-        borderRadius: 14,
-        paddingVertical: 14,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.02)',
-    },
-    actionIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 6,
-    },
-    actionLabel: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: COLORS.text.primary,
-    },
-
     activityList: {
         gap: 8,
     },
@@ -637,6 +612,39 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: COLORS.text.tertiary,
         marginTop: 8,
+    },
+
+    // Contributor card styles
+    contributorCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: `${COLORS.primary}08`,
+        borderRadius: 16,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: `${COLORS.primary}20`,
+    },
+    contributorIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: `${COLORS.primary}15`,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    contributorText: {
+        flex: 1,
+    },
+    contributorTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: COLORS.text.primary,
+        marginBottom: 4,
+    },
+    contributorSubtitle: {
+        fontSize: 14,
+        color: COLORS.text.secondary,
     },
 
     footer: {

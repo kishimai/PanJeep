@@ -78,12 +78,12 @@ export default function PassengerHome() {
     const searchTimeout = useRef(null);
     const latestQuery = useRef('');
 
-    // Static data (example)
-    const routesNearYou = [
-        { id: 1, code: "12A", destination: "Downtown Loop", time: "15m", fare: "₱15", capacity: "Moderate" },
-        { id: 2, code: "8B", destination: "University Express", time: "7m", fare: "₱12", capacity: "Light" },
-        { id: 3, code: "5C", destination: "Coastal Line", time: "20m", fare: "₱20", capacity: "Heavy" },
-    ];
+    // Live data: nearby routes
+    const [nearbyRoutes, setNearbyRoutes] = useState([]);
+    const [loadingNearby, setLoadingNearby] = useState(false);
+    const [userCoords, setUserCoords] = useState(null);
+
+    // Static data (example for live jeeps – can be replaced later)
     const liveJeeps = [
         { id: 1, route: "12A", distance: "0.8 km", capacity: "12/20", arrival: "3 min" },
         { id: 2, route: "8B", distance: "1.2 km", capacity: "5/20", arrival: "Now" },
@@ -94,7 +94,13 @@ export default function PassengerHome() {
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(20)).current;
     const buttonScale = useRef(new Animated.Value(1)).current;
-    const cardAnimations = useRef(routesNearYou.map(() => new Animated.Value(1))).current;
+    // We'll create card animations dynamically based on nearbyRoutes length
+    const [cardAnimations, setCardAnimations] = useState([]);
+
+    // Update cardAnimations when nearbyRoutes changes
+    useEffect(() => {
+        setCardAnimations(nearbyRoutes.map(() => new Animated.Value(1)));
+    }, [nearbyRoutes]);
 
     useEffect(() => {
         Animated.parallel([
@@ -104,6 +110,62 @@ export default function PassengerHome() {
         return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current); };
     }, []);
 
+    // --- Location and nearby routes fetching ---
+    useEffect(() => {
+        let isMounted = true;
+
+        const getUserLocationAndFetchRoutes = async () => {
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    console.log('Location permission denied');
+                    return;
+                }
+
+                const location = await Location.getCurrentPositionAsync({});
+                const coords = {
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                };
+                if (isMounted) setUserCoords(coords);
+
+                setLoadingNearby(true);
+                const { data, error } = await supabase
+                    .rpc('get_nearby_routes', {
+                        user_lng: coords.longitude,
+                        user_lat: coords.latitude,
+                        radius_meters: 2000, // 2 km radius
+                    });
+
+                if (error) throw error;
+
+                if (isMounted) {
+                    const formatted = (data || []).map(route => ({
+                        id: route.id,
+                        code: route.route_code,
+                        // UI fields (customize as needed)
+                        destination: route.route_code, // fallback – replace with region name if available
+                        time: route.distance < 1000
+                            ? `${Math.round(route.distance)} m`
+                            : `${(route.distance / 1000).toFixed(1)} km`,
+                        fare: '₱13', // static – adjust if you have fare data
+                        capacity: 'Moderate', // static – or derive from passenger_usage_score
+                    }));
+                    setNearbyRoutes(formatted);
+                }
+            } catch (err) {
+                console.error('Error fetching nearby routes:', err);
+                Alert.alert('Error', 'Could not load nearby routes');
+            } finally {
+                if (isMounted) setLoadingNearby(false);
+            }
+        };
+
+        getUserLocationAndFetchRoutes();
+
+        return () => { isMounted = false; };
+    }, []);
+
     const handlePressIn = useCallback((anim) => {
         Animated.spring(anim, { toValue: 0.96, useNativeDriver: true, friction: 8 }).start();
     }, []);
@@ -111,14 +173,19 @@ export default function PassengerHome() {
         Animated.spring(anim, { toValue: 1, useNativeDriver: true, friction: 8 }).start();
     }, []);
     const handleCardPressIn = useCallback((index) => {
-        Animated.spring(cardAnimations[index], { toValue: 0.98, useNativeDriver: true, friction: 8 }).start();
-    }, []);
+        if (cardAnimations[index]) {
+            Animated.spring(cardAnimations[index], { toValue: 0.98, useNativeDriver: true, friction: 8 }).start();
+        }
+    }, [cardAnimations]);
     const handleCardPressOut = useCallback((index) => {
-        Animated.spring(cardAnimations[index], { toValue: 1, useNativeDriver: true, friction: 8 }).start();
-    }, []);
+        if (cardAnimations[index]) {
+            Animated.spring(cardAnimations[index], { toValue: 1, useNativeDriver: true, friction: 8 }).start();
+        }
+    }, [cardAnimations]);
     const navigateToRoutes = useCallback(() => router.push('/routes.passenger'), []);
 
     // POI search
+    // POI search - only show approved POIs to passengers
     const searchPOIs = useCallback(async (query) => {
         if (!query.trim()) {
             setPoiResults([]);
@@ -129,13 +196,17 @@ export default function PassengerHome() {
             const { data, error } = await supabase
                 .from('points_of_interest')
                 .select('id, name, type, geometry')
+                .eq('status', 'approved')  // Only show approved POIs
                 .ilike('name', `%${query}%`)
                 .limit(10);
+
             if (error) throw error;
+
             if (!data || data.length === 0) {
                 setPoiResults([]);
                 return;
             }
+
             const results = data.map(poi => ({
                 id: poi.id,
                 name: poi.name,
@@ -143,6 +214,7 @@ export default function PassengerHome() {
                 latitude: poi.geometry.coordinates[1],
                 longitude: poi.geometry.coordinates[0],
             }));
+
             setPoiResults(results);
             setShowResults(true);
         } catch (error) {
@@ -172,7 +244,6 @@ export default function PassengerHome() {
         if (searchQuery.trim()) searchPOIs(searchQuery);
     }, [searchQuery, searchPOIs]);
 
-    // Navigate to routes with destination POI
     const handleSelectPOI = useCallback((poi) => {
         setShowResults(false);
         setSearchQuery(poi.name);
@@ -274,7 +345,7 @@ export default function PassengerHome() {
                     </View>
                 </Modal>
 
-                {/* Live Jeeps */}
+                {/* Live Jeeps (static for now) */}
                 <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.sectionTitleRow}>
@@ -289,7 +360,7 @@ export default function PassengerHome() {
                     </View>
                 </Animated.View>
 
-                {/* Routes Near You */}
+                {/* Routes Near You (live data) */}
                 <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.sectionTitleRow}>
@@ -307,34 +378,46 @@ export default function PassengerHome() {
                             </Animated.View>
                         </TouchableOpacity>
                     </View>
-                    {routesNearYou.map((route, index) => (
-                        <Animated.View
-                            key={route.id}
-                            style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: cardAnimations[index] }] }}
-                        >
-                            <TouchableOpacity
-                                style={styles.routeCard}
-                                onPress={navigateToRoutes}
-                                onPressIn={() => handleCardPressIn(index)}
-                                onPressOut={() => handleCardPressOut(index)}
-                                activeOpacity={0.9}
-                                delayPressIn={50}
+
+                    {loadingNearby ? (
+                        <View style={styles.loadingNearby}>
+                            <ActivityIndicator size="small" color={COLORS.primary} />
+                            <Text style={styles.loadingNearbyText}>Finding routes near you...</Text>
+                        </View>
+                    ) : nearbyRoutes.length === 0 ? (
+                        <View style={styles.emptyNearby}>
+                            <Text style={styles.emptyNearbyText}>No routes nearby</Text>
+                        </View>
+                    ) : (
+                        nearbyRoutes.map((route, index) => (
+                            <Animated.View
+                                key={route.id}
+                                style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }, { scale: cardAnimations[index] || 1 }] }}
                             >
-                                <View style={styles.routeBadge}>
-                                    <Text style={styles.routeCode}>{route.code}</Text>
-                                </View>
-                                <View style={styles.routeInfo}>
-                                    <Text style={styles.routeDestination}>{route.destination}</Text>
-                                    <View style={styles.routeMeta}>
-                                        <Text style={styles.routeTime}>{route.time}  •  {route.fare}</Text>
-                                        <View style={[styles.capacityTag, route.capacity === 'Light' && styles.capacityLight, route.capacity === 'Heavy' && styles.capacityHeavy]}>
-                                            <Text style={styles.capacityTagText}>{route.capacity}</Text>
+                                <TouchableOpacity
+                                    style={styles.routeCard}
+                                    onPress={navigateToRoutes}
+                                    onPressIn={() => handleCardPressIn(index)}
+                                    onPressOut={() => handleCardPressOut(index)}
+                                    activeOpacity={0.9}
+                                    delayPressIn={50}
+                                >
+                                    <View style={styles.routeBadge}>
+                                        <Text style={styles.routeCode}>{route.code}</Text>
+                                    </View>
+                                    <View style={styles.routeInfo}>
+                                        <Text style={styles.routeDestination}>{route.destination}</Text>
+                                        <View style={styles.routeMeta}>
+                                            <Text style={styles.routeTime}>{route.time}  •  {route.fare}</Text>
+                                            <View style={[styles.capacityTag, route.capacity === 'Light' && styles.capacityLight, route.capacity === 'Heavy' && styles.capacityHeavy]}>
+                                                <Text style={styles.capacityTagText}>{route.capacity}</Text>
+                                            </View>
                                         </View>
                                     </View>
-                                </View>
-                            </TouchableOpacity>
-                        </Animated.View>
-                    ))}
+                                </TouchableOpacity>
+                            </Animated.View>
+                        ))
+                    )}
                 </Animated.View>
 
                 {/* Guest hint */}
@@ -578,6 +661,24 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: COLORS.accent,
         fontWeight: '600',
+    },
+    loadingNearby: {
+        paddingVertical: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loadingNearbyText: {
+        marginTop: 8,
+        fontSize: 14,
+        color: COLORS.text.secondary,
+    },
+    emptyNearby: {
+        paddingVertical: 20,
+        alignItems: 'center',
+    },
+    emptyNearbyText: {
+        fontSize: 14,
+        color: COLORS.text.secondary,
     },
     guestSection: {
         flexDirection: 'row',
